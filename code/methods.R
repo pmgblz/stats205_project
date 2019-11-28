@@ -217,19 +217,55 @@ best_sma <- sma(day_train_forecast$cnt, o = best_cv_order,
                 h = nrow(day_test_forecast), interval = "np")
 plot(forecast(best_sma, h = nrow(day_test_forecast) ))
 
+# plot results 
+results <- data.table(x = day$dteday)
+results[, y := day$cnt]
+results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+results[, fitted := ifelse(test == 0, mod$fitted.values, NA)]
+results[, forecast := ifelse(test == 1, 
+                             forecast(mod, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)],
+                             NA)]
+
+mse_tbats_test <- mean((day_test_forecast$cnt - forecast(mod, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)])^2)
+mse_tbats_train <- mean((day_train_forecast$cnt - mod$fitted)^2)
+
+results %>% 
+  ggplot(aes(x = x, y = y)) + geom_point() +
+  geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
+  geom_line(aes(x = x, y = forecast, col = "Forecast"))
+ggsave()
+
 
 ########## CUBIC SPLINES ################# 
 
 # this does cross validation: https://www.rdocumentation.org/packages/forecast/versions/8.9/topics/splinef
 # same as arima (0, 2, 2)
 # shown how cubic smoothing splines can be used to obtain local linear forecasts for a univariate time series
-cubic_smoothing_spline <- splinef(day_train_forecast$cnt,  h = nrow(day_test_forecast))
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5, 365.25))
+cubic_smoothing_spline <- splinef(ts_cnt,  h = nrow(day_test_forecast))
 fcast_cubic_spline <- forecast(cubic_smoothing_spline,  h = nrow(day_test_forecast))
 plot(fcast_cubic_spline)
 
+results <- data.table(x = day$dteday)
+results[, y := day$cnt]
+results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+results[, fitted := ifelse(test == 0, cubic_smoothing_spline$fitted, NA)]
+results[, forecast := ifelse(test == 1, 
+                             forecast(cubic_smoothing_spline, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)],
+                             NA)]
+
+mse_tbats_test <- mean((day_test_forecast$cnt - forecast(cubic_smoothing_spline, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)])^2)
+mse_tbats_train <- mean((day_train_forecast$cnt - cubic_smoothing_spline$fitted)^2)
+
+results %>%
+  ggplot(aes(x = x, y = y)) + geom_point() + 
+  geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
+  geom_line(aes(x = x, y = forecast, col = "Forecast"))
 
 ######## EXPONENTIAL SMOOTHING #############
 
+# 1. this is not working without arma errors!!! chosen by AIC
+numbins <- 5
 day_train_forecast$bins_ets <- as.numeric(cut(day_train_forecast$dteday, numbins + 1))
 
 # some combinations will be invalid: skip
@@ -247,8 +283,6 @@ cross_validate_tbats <- function(b, tr, dtr, ar, numbins = 5) {
     # hold out set is length of training set
     
     #mod <- ets(ts_cnt, model = paste0(er, tr, sea))
-    
-    
     ts_cnt <- msts(train$cnt, seasonal.periods=c(7, 30.5, 365.25))
     mod <- tbats(ts_cnt, use.box.cox = b, use.trend = tr, 
                  use.damped.trend = dtr, use.arma.errors = ar)
@@ -263,25 +297,36 @@ cross_validate_tbats <- function(b, tr, dtr, ar, numbins = 5) {
   
 }
 
-
-# error_type <- c("A", "M")IN 
-# trend_type <- c("A", "M", "N")
-# season_type <- c("A", "M", "N")
+eval_true_matrix_input <- function(input) {
+  if(input == TRUE) {
+    return(1)
+  } else {
+    return(0)
+  }
+}
 
   
 use_boxcox <- c(TRUE, FALSE)
 use_trend <- c(TRUE, FALSE)
 use_damped_trend <- c(TRUE, FALSE)
-use_arma_errors <- c(TRUE, FALSE)
+use_arma_errors <- c(TRUE, FALSE) # onlye working with TRUE!
   
-mse_tbats <- c()
+mse_tbats <- matrix(nrow = 16, ncol = 5)
 c <- 0
 for(b in use_boxcox) {
   for(tr in use_trend) {
     for(dtr in use_damped_trend) {
       for(ar in use_arma_errors) {
-        c <- c + 1
-        mse_tbats[c] <- cross_validate_tbats(b = b, tr = tr, dtr = dtr, ar = ar)
+        
+          c <- c + 1
+        
+          mse_tbats[c, 1] <- eval_true_matrix_input(b)
+          mse_tbats[c, 2] <- eval_true_matrix_input(tr)
+          mse_tbats[c, 3] <- eval_true_matrix_input(dtr)
+          mse_tbats[c, 4] <- eval_true_matrix_input(ar)
+
+        
+          mse_tbats[c, 5] <- cross_validate_tbats(b = b, tr = tr, dtr = dtr, ar = ar)
         
       }
     }
@@ -290,110 +335,40 @@ for(b in use_boxcox) {
   
 }
 
+# what's the best model? 
+mse_tbats[which.min(mse_tbats[, 5]), ]
 
 
-fit <- ets(day_train_forecast$cnt)
-plot(forecast(fit))
+# far2 <- function(x, h){forecast(tbats(x), h=h)}
+# e <- tsCV(ts_cnt, far2, h=nrow(day_test_forecast), window = 30)
 
-# 
-# day_ts <- ts(day$cnt, start = c(2011, 1, 1), end = c(2012, 12, 31), frequency = 7)
-# 
-# # weekly, monthly and yearly seasonality
-# y <- msts(day_train_forecast$cnt, seasonal.periods=c(1, 7,30.5, 365.25), start = c(2011,01) )
+# refit best model on entire training set and forecast on test set
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5, 365.25))
+mod <- tbats(ts_cnt, use.trend = FALSE, use.damped.trend = TRUE,
+             use.arma.errors = FALSE)
+forecast_mod_tbats <- forecast(mod, h = nrow(day_test_forecast))
 
+results <- data.table(x = day$dteday)
+results[, y := day$cnt]
+results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+results[, fitted := ifelse(test == 0, mod$fitted.values, NA)]
+results[, forecast := ifelse(test == 1, 
+                             forecast(mod, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)],
+                             NA)]
 
+mse_tbats_test <- mean((day_test_forecast$cnt - forecast(mod, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)])^2)
+mse_tbats_train <- mean((day_train_forecast$cnt - mod$fitted)^2)
 
-# Multi-step, re-estimation
-#x <- msts(day$cnt, seasonal.periods=c(7, 365.25))
-# SHIFT FOREWARD BY 7 OBSERVATIONS (ONE WEEK)
-x <- ts(day$cnt, start = c(2011, 1), deltat = 1/(365.5))
-k <- 7 # minimum data length for fitting a model (ONE WEEK)
-n <- length(day$cnt)
-f <- 365.5
-mae1 <- mae2 <- mae3 <- matrix(NA,f,f)
-st <- tsp(x)[1]+(k-1)/f
-for(i in 1:shift)
-{
-  xshort <- window(x, end=st + (i-1))
-  xnext <- window(a10, start=st + (i-1) + 1/12, end=st + i)
-  fit1 <- tslm(xshort ~ trend + season, lambda=0)
-  fcast1 <- forecast(fit1, h=12)
-  fit2 <- Arima(xshort, order=c(3,0,1), seasonal=list(order=c(0,1,1), period=12),
-                include.drift=TRUE, lambda=0, method="ML")
-  fcast2 <- forecast(fit2, h=12)
-  fit3 <- ets(xshort,model="MMM",damped=TRUE)
-  fcast3 <- forecast(fit3, h=12)
-  mae1[i,] <- abs(fcast1[['mean']]-xnext)
-  mae2[i,] <- abs(fcast2[['mean']]-xnext)
-  mae3[i,] <- abs(fcast3[['mean']]-xnext)
-}
-plot(1:12, colMeans(mae1), type="l", col=2, xlab="horizon", ylab="MAE",
-     ylim=c(0.35,1.5))
-lines(1:12, colMeans(mae2), type="l",col=3)
-lines(1:12, colMeans(mae3), type="l",col=4)
-legend("topleft",legend=c("LM","ARIMA","ETS"),col=2:4,lty=1)
+results %>% 
+  ggplot(aes(x = x, y = y)) + geom_point() +
+  geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
+  geom_line(aes(x = x, y = forecast, col = "Forecast"))
+ggsave()
 
 
-#### Starting with 1 month of training data
-#### We think it has weekly frequency, forecast for a week
-dt <- day
-i <- 30  
-forecast_length <- 48
-pred_ets <- c()
-#pred_arima <- c()
-while(i <= nrow(dt)){
-  
-  ts <- ts(dt[1:i, "cnt"], frequency=7)
-  
-  #pred_ets <- rbind(pred_ets, data.frame(forecast(ets(ts), 7)$mean[1:3]))
-  pred_arima <- rbind(pred_arima, data.frame(forecast(auto.arima(ts), forecast_length)$mean[1:forecast_length]))
-  
-  i = i + forecast_length
-  
-}
-names(pred_arima) <- "arima"
-names(pred_ets) <- "ets"
-
-pred_ets <- ts(pred_ets$ets, start=c(2005, 01), frequency = 12)
-pred_arima <- ts(pred_arima$arima, start=c(2005, 01), frequency =12)
-
-accuracy(pred_ets, ts_dt)
-accuracy(pred_arima, ts_dt)
-
-######## UNIVARIATE CASE ###########
-
-
-
-
-# simple moving average 
-sma(day_train_forecast$cnt) -> test
-
-#Fit an AR(2) model to each rolling origin subset
-far2 <- function(x, h){sma(day_train_forecast$cnt, order = h)}
-e <- tsCV(day_train_forecast$cnt, far2, h=13)
-
-tsCV(day_train_forecast$cnt, forecastfunction = sma)
-
-# set as time series object with 
-# weekly, monthly and yearly seasonality
-y <- msts(day_train_forecast$cnt, seasonal.periods=c(7,30.5, 365.25))
-
-
-# CUBIC SMOOTHING SPLINES: https://www.rdocumentation.org/packages/forecast/versions/8.9/topics/splinef
-# same as arima (0, 2, 2)
-# shown how cubic smoothing splines can be used to obtain local linear forecasts for a univariate time series
-cubic_smoothing_spline <- splinef(y)
-fcast_cubic_spline <- forecast(cubic_smoothing_spline,  h = nrow(day_test_forecast))
-plot(fcast_cubic_spline)
-
-far2 <- function(x, h){forecast(splinef(y,  h = nrow(day_test_forecast)), h=h)}
-e <- tsCV(y, far2, h=1)
-
-# NEURAL NETWORK - DO IN PYTHON!!!
-# fit <- nnetar(y)
-# plot(forecast(fit,h=nrow(day_test_forecast)))
-# lines(y)
-
+plot(forecast_mod_tbats, main = "Best TBATS CV",sub = paste0("Training MSE: ", mse_tbats_train, 
+                                      "; Test MSE: ", mse_tbats_test))
+lines(mod$fitted.values, col = 4)
 
 # Fit MLP
 mlp.fit <- mlp(y)
@@ -403,154 +378,6 @@ plot(frc)
 fit6 <- elm(y)
 frc <- forecast(fit6,h=nrow(day_test_forecast))
 plot(frc)
-
-# ARIMA MODELLING (WITHOUT COVARIATES)
-#y <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 365.25))
-y <- ts(day_train_forecast$cnt, frequency= 7)
-
-fit <- auto.arima(day_train_forecast$cnt)
-autoplot(fit)
-
-day_train_forecast$prewhite <- fit$residuals
-
-fcast <- forecast(fit, h = nrow(day_test_forecast))
-plot(fcast)
-
-# LINEAR MODEL WITH TREND & SEASONAL DUMMIES
-
-
-# EXPONENTIAL SMOOTHING
-
-
-# KERNEL RIDGE REGRESSION
-
-
-# set as time series  https://robjhyndman.com/hyndsight/dailydata/
-y <- ts(day_train_forecast$cnt, frequency= 7)
-
-
-day[, c("temp", "hum",
-        "windspeed", "holiday", "workingday", "weathersit", "temp")] -> m
-# set as time-series: 
-#modelcv <- CVar(y, k=5, lambda=0.15)
-x <- day_train_forecast$cnt
-#y <- ts(day_train_forecast$cnt, frequency=c(7,365.25))
-y <- msts(day_train_forecast$cnt, seasonal.periods=c(7,31, 365.25))
-#y <- msts(x, seasonal.periods=c(7,365.25))
-#y <- ts(x, frequency=7)
-#fit <- tbats(y)
-#fc <- forecast(fit)
-#plot(fc)
-
-# fit <- tbats(y)
-# fc <- forecast(fit)
-# plot(fc)
-
-covs <- as.matrix(day_train_forecast[, c("temp", "hum", "windspeed", "holiday", 
-                          "workingday", "weathersit")])
-covs_pred <- as.matrix(day_test_forecast[, c("temp", "hum", "windspeed", "holiday", 
-                                         "workingday", "weathersit")])
-fit <- auto.arima(y, xreg = covs)
-autoplot(fit)
-fcast <- forecast(fit, xreg = covs_pred, h = nrow(day_test_forecast))
-plot(fcast)
-# calcualte mse
-mse <- mean((day_test_forecast$cnt - fcast$mean)^2)
-mse
-day_test_forecast$predicted <- fcast$mean
-
-# neural network autoregression 
-modelcv <- CVar(lynx, k=5, lambda=0.15)
-print(modelcv)
-
-
-TSA::prewhiten(x, y, x.model = fit)
-
-day$combined <- NA 
-day[1:length(day_train_forecast), ]$combined <- fit$fitted
-rbind(fit$fitted,day_test_forecast$predicted )
-
-day_test_forecast$predicted <- fcast$mean
-plot(day_train_forecast$dteday, day_train_forecast$cnt, col = 3, type = "l")
-lines(day_train_forecast$dteday, fit$fitted, col = 4)
-
-plot(day_test_forecast$dteday, day_test_forecast$cnt, col = 3, type = "l")
-lines(day_test_forecast$dteday, day_test_forecast$predicted, col = 4)
-
-far2 <- function(x, h){forecast(Arima(y, order=c(1,1,1)), h=h)}
-e <- tsCV(y, far2, h=1)
-mean(e^2, na.rm = TRUE)
-
-aic_vals_temp <- NULL
-aic_vas <- NULL 
-
-for(i in 1:5) {
-  for(j in 1:5) {
-    xreg1 <- fourier()
-  }
-}
-
-
-y <- ts(day$cnt, frequency=7)
-z <- fourier(ts(day$cnt, frequency=365.25), K=5)
-zf <- fourier(ts(day$cnt, frequency=365.25), K=5, h=100)
-fit <- auto.arima(y, xreg=cbind(day$workingday,day$yr), seasonal=FALSE)
-fc <- forecast(fit, xreg=cbind(day$workingday,day$yr), h=100)
-plot(fc)
-
-fit <- auto.arima(y)
-autoplot(fit)
-fcast <- forecast(fit)
-plot(fcast)
-
-ts <- ts(day$cnt, start=c(2011,1,1),frequency=365.25)
-plot.ts(ts)
-plot(decompose(ts))
-plot(stl(ts,
-         s.window="periodic"))
-MK = MannKendall(ts)
-SMK = SeasonalMannKendall(ts)
-sea.sens.slope(ts)
-
-x <- day$cnt
-ets(x)
-fit <- tbats(x)
-seasonal <- !is.null(fit$seasonal)
-seasonal
-
-# create numeric day/hour counter (starting counting with 1 at the beginning of the period)
-hour[ , day_counter := .GRP, by = c("dteday")]
-hour[ , time_counter := day_counter + hr - 1 + (day_counter - 1)*23]
-day[, time_counter := .GRP, by = c("dteday")]
-
-# obtain results for prediciton on equally spacex N = 200 Xs
-results_test <- kernel_predictions(df = hour_train_rand, 
-                                   test_df = hour_test_rand, 
-                                   myx = "hr", 
-                                   myy = "cnt",
-                                   a = min(hour$hr),
-                                   b = max(hour$hr),
-                                   m = 10) 
-
-# overall (day-hour)
-regressogram(hour$time_counter, hour$cnt)
-
-# ARIMA(1,0,2)(0,1,0)[365] with drift 
-fit <- auto.arima(y)
-autoplot(fit)
-fcast <- forecast(fit)
-plot(fcast)
-plot(forecast(fit))
-# day only 
-regressogram(day$time_counter, day$cnt)
-
-if (class(fit2) != "Arima" && class(fit2) != "estimate") {
-  print("STOP")
-}
-
-fit2 <- fit
-class(fit2) <- c("Arima", "forecast_ARIMA", "ARIMA")
-
 
 
 
