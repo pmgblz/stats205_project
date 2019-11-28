@@ -232,50 +232,63 @@ plot(fcast_cubic_spline)
 
 day_train_forecast$bins_ets <- as.numeric(cut(day_train_forecast$dteday, numbins + 1))
 
-cross_validate_ets <- function(er, tr, sea = "N", numbins = 5) {
-  
+# some combinations will be invalid: skip
+cross_validate_tbats <- function(b, tr, dtr, ar, numbins = 5) {
+
   mse_cv <- c()
   
   for(i in 1:numbins) {
+    
     
     train <- day_train_forecast[bins <= i, ]
     test <- day_train_forecast[bins == i + 1, ]
     
     # run simple moving average on test set 
     # hold out set is length of training set
-    mod <- ets(train$cnt, model = paste0(er, tr, sea))
     
-    # calcualte mse 
+    #mod <- ets(ts_cnt, model = paste0(er, tr, sea))
+    
+    
+    ts_cnt <- msts(train$cnt, seasonal.periods=c(7, 30.5, 365.25))
+    mod <- tbats(ts_cnt, use.box.cox = b, use.trend = tr, 
+                 use.damped.trend = dtr, use.arma.errors = ar)
+    
     mse_cv[i] <- mean((test$cnt -  forecast(mod, h = nrow(test))$mean[1:nrow(test)])^2)
     
     
   }
-  
-  
+  print(mean(mse_cv))
   return(mean(mse_cv))
+
+  
 }
 
 
-error_type <- c("A", "M")
-trend_type <- c("A", "M", "N")
-#season_type <- c("A", "M", "N")
+# error_type <- c("A", "M")IN 
+# trend_type <- c("A", "M", "N")
+# season_type <- c("A", "M", "N")
 
-mse_ets <- c()
+  
+use_boxcox <- c(TRUE, FALSE)
+use_trend <- c(TRUE, FALSE)
+use_damped_trend <- c(TRUE, FALSE)
+use_arma_errors <- c(TRUE, FALSE)
+  
+mse_tbats <- c()
 c <- 0
-for(er in error_type) {
-  for(tr in trend_type) {
-    for(sea in season_type) {
-      c <- c + 1
-      mse_ets[c] <- cross_validate_ets(er, tr, sea)
-      
+for(b in use_boxcox) {
+  for(tr in use_trend) {
+    for(dtr in use_damped_trend) {
+      for(ar in use_arma_errors) {
+        c <- c + 1
+        mse_tbats[c] <- cross_validate_tbats(b = b, tr = tr, dtr = dtr, ar = ar)
+        
+      }
     }
+    
   }
   
 }
-
-
-
-
 
 
 
