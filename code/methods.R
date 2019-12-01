@@ -42,60 +42,17 @@ library(Mcomp)
 # Run path
 if (dir.exists("/Users/paula/stats205_project/")) {
   setwd("/Users/paula/stats205_project/")
+  outputpath <- "/Users/paula/stats205_project/output/plots"
 } else {
   setwd("ENTER YOUR PATH HERE")
 }
 
+# load, clean, run descripties 
+source("code/load_clean.R")
+source("code/descriptives.R")
 
-######## LOAD & CLEAN DATA ###########
-
-# Load data 
-day <- read_csv("data/day.csv")
-hour <- read_csv("data/hour.csv")
-
-# make sure it is ordered correctly 
-hour <- hour[order(hour$dteday, hour$hr),]
-day <- day[order(day$dteday),]
-
-
-# Load functions 
-source("code/kernel_functions.R")
-
-# Clean data 
-setDT(hour)
-hour[, season := as.factor(ifelse(season == 1, "Spring", 
-                                  ifelse(season == 2, "Summer", 
-                                         ifelse(season == 3, "Fall", 
-                                                ifelse(season == 4, "Winter", NA)))))]
-
-hour[, weathersit := as.factor(ifelse(weathersit == 1, "Clear", 
-                                ifelse(weathersit == 2, "Misty", 
-                                       ifelse(weathersit == 3, "Rain", 
-                                              ifelse(weathersit == 4, "Thunderstorm", NA)))))]
-
-hour <- hour[, -c("instant")]
-
-
-# dummify the data
-dmy <- dummyVars(" ~ .", data = hour)
-hour <- data.frame(predict(dmy, newdata = hour))
-
-
-# Drop rows containing missing values (doesn't actually do anything)
-hour <- na.omit(hour)
-
-# get total counts
-setDT(hour)
-setDT(day)
-
-# further cleaning 
-setDT(hour)
-hour[, yr := ifelse(hour$yr == 0, 2011, 2012)]
-
-hour_temp <- hour[, .(mean_count = mean(cnt)), by = c("temp")]
-hour_temp <- hour[, lapply(.SD, mean), by=temp]
-
-day[, month := mnth + yr*12]
+# fix colors 
+cols <- c("steelblue4", "goldenrod2", "grey4")
 
 ######## TEST & TRAIN DATA ###########
 set.seed(1)
@@ -109,79 +66,11 @@ day_test_forecast <- day[dteday > "2012-11-30", ]
 # day_train_forecast <- day[1:round(nrow(day)*train_fraction), ]
 # day_test_forecast <- day[(round(nrow(day)*train_fraction) + 1):nrow(day), ]
 
-######## DESCRIPTIVES ###########
-
-# Make a data.frame containing summary statistics of interest
-summ_stats <- fBasics::basicStats(hour[, -c("dteday")])
-summ_stats <- as.data.frame(t(summ_stats))
-
-# Rename some of the columns for convenience
-summ_stats <- summ_stats[c("Mean", "Stdev", "Minimum", "1. Quartile", "Median",  "3. Quartile", "Maximum")]
-colnames(summ_stats)[colnames(summ_stats) %in% c('1. Quartile', '3. Quartile')] <- c('Lower quartile', 'Upper quartile')
-
-row.names(summ_stats) <- c("Fall", "Spring", "Summer", "Winter", 
-                           "Year", "Month", "Hour",
-                           "Holiday", "Day of Week", "Workday", "Clear Weather", "Misty Weather", 
-                           "Rainy Weather", "Thunderstorm", "Temperature",
-                           "Felt Temperature", "Humidity", "Windspeed", "Casual Users", 
-                           "Registered Users", "All Users")
-
-
-
-# save
-stargazer(summ_stats,
-          type = "latex", 
-          summary=FALSE, rownames=TRUE,
-          digits = 2) -> sumstats 
-
-tabular_positions <- grep("tabular", sumstats)
-sumstats <- sumstats[tabular_positions[1]:tabular_positions[2]]
-write(sumstats,  file="output/tables/summary_stats.tex")
-
-hour_plot <- hour
-colnames(hour_plot) <- c("Date", "Fall", "Spring", "Summer", "Winter", 
-                  "Year", "Month", "Hour",
-                  "Holiday", "Day of Week", "Workday", "Clear Weather", "Misty Weather", 
-                  "Rainy Weather", "Thunderstorm", "Temperature",
-                  "Felt Temperature", "Humidity", "Windspeed", "Casual Users", 
-                  "Registered Users", "All Users")
-
-# correlation plot 
-pairwise_pvalues <- psych::corr.test(hour_plot, hour_plot)$p
-png(filename="output/plots/corrplot.png")
-pairwise_pvalues <- psych::corr.test(hour_plot, hour_plot)$p
-corrplot(cor(hour_plot),
-         type="upper",
-         tl.col="black",
-         order="hclust",
-         tl.cex=0.6,
-         addgrid.col = "black",
-         p.mat=pairwise_pvalues,
-         sig.level=0.05,
-         number.font=10,
-         insig="blank") 
-dev.off()
-
-# plot daily trends
-day %>% 
-  ggplot(aes(dteday, cnt)) + geom_point(size = 0.5) + 
-  xlab("Day") + ylab("Total Number of Users")
-
-ggsave("output/plots/users_by_day.png")
-
-# average number of users by hour 
-users_by_hour <- hour[, .(avg_users_by_hours = mean(cnt)), by = c("hr")]
-
-users_by_hour %>% 
-  ggplot(aes(hr, avg_users_by_hours)) + geom_line(size = 0.5) + 
-  xlab("Hour") + ylab("Average Number of Users")
-ggsave("output/plots/average_number_users_by_hour.png")
-
-
-
 ######### SIMPLE MOVING AVERAGE ########### 
 
-numbins <- 5
+# 15 fold CV is aproximately equal to a month in each bin
+
+numbins <- 15
 day_train_forecast$bins <- as.numeric(cut(day_train_forecast$dteday, numbins + 1))
 order_max <- 20
 mse_order <- matrix(nrow = order_max, ncol = 2)
@@ -197,7 +86,7 @@ for(o in 1:order_max) {
     
     # run simple moving average on test set 
     # hold out set is length of training set
-    mod <- sma(train$cnt, order = o, h = nrow(test))
+    mod <- sma(train$cnt, order = o, h = nrow(test), interval = "nonparametric")
     
     # calcualte mse 
     mse_cv[i] <- mean((test$cnt -  forecast(mod, h = nrow(test))$mean[1:nrow(test)])^2)
@@ -214,27 +103,36 @@ best_cv_order <- which.min(mse_order[, 2])
 
 # refit with best cv order (and predict on test set)
 best_sma <- sma(day_train_forecast$cnt, o = best_cv_order,
-                h = nrow(day_test_forecast), interval = "np")
-plot(forecast(best_sma, h = nrow(day_test_forecast) ))
+                h = nrow(day_test_forecast), interval = "nonparametric")
+fcast_sma <- forecast(best_sma, h = nrow(day_test_forecast), interval = "nonparametric")
 
 # plot results 
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
 results[, test := ifelse(x <= "2012-11-30", 0, 1)]
-results[, fitted := ifelse(test == 0, mod$fitted.values, NA)]
-results[, forecast := ifelse(test == 1, 
-                             forecast(mod, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)],
-                             NA)]
+results[test == 0, fitted := best_sma$fitted]
+results[test == 1, forecast := fcast_sma$mean[1:nrow(day_test_forecast)]]
+results[test == 1, lower_ci := fcast_sma$lower[1:nrow(day_test_forecast)]]
+results[test == 1, upper_ci := fcast_sma$upper[1:nrow(day_test_forecast)]]
 
-mse_tbats_test <- mean((day_test_forecast$cnt - forecast(mod, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)])^2)
-mse_tbats_train <- mean((day_train_forecast$cnt - mod$fitted)^2)
+mse_sma_test <- mean((day_test_forecast$cnt - fcast_sma$mean[1:nrow(day_test_forecast)])^2)
+mse_sma_train <- mean((day_train_forecast$cnt - best_sma$fitted)^2)
+
 
 results %>% 
-  ggplot(aes(x = x, y = y)) + geom_point() +
+  ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
-  geom_line(aes(x = x, y = forecast, col = "Forecast"))
-ggsave()
-
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
+  labs(title = paste0("Moving Average of Order ", best_cv_order),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_sma_test)), "; Training RMSE: ", round(sqrt(mse_sma_train))), 
+       x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
+                    labels=c("Training","Forecast")) + 
+  scale_fill_manual("Non-parametric 95% PI", values = "grey12")
+ggsave(paste0(outputpath, "/sma_forecast.png"), width = 8, height = 4)
 
 ########## CUBIC SPLINES ################# 
 
@@ -249,31 +147,40 @@ plot(fcast_cubic_spline)
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
 results[, test := ifelse(x <= "2012-11-30", 0, 1)]
-results[, fitted := ifelse(test == 0, cubic_smoothing_spline$fitted, NA)]
-results[, forecast := ifelse(test == 1, 
-                             forecast(cubic_smoothing_spline, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)],
-                             NA)]
+results[test == 0, fitted := cubic_smoothing_spline$fitted]
+results[test == 1, forecast := fcast_cubic_spline$mean[1:nrow(day_test_forecast)]]
+results[test == 1, upper_ci := fcast_cubic_spline$upper[1:nrow(day_test_forecast), 2]]
+results[test == 1, lower_ci := fcast_cubic_spline$lower[1:nrow(day_test_forecast), 2]]
 
-mse_tbats_test <- mean((day_test_forecast$cnt - forecast(cubic_smoothing_spline, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)])^2)
-mse_tbats_train <- mean((day_train_forecast$cnt - cubic_smoothing_spline$fitted)^2)
+mse_cspline_test <- mean((day_test_forecast$cnt - fcast_cubic_spline$mean[1:nrow(day_test_forecast)])^2)
+mse_cspline_train <- mean((day_train_forecast$cnt - cubic_smoothing_spline$fitted)^2)
 
-results %>%
-  ggplot(aes(x = x, y = y)) + geom_point() + 
+results %>% 
+  ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
-  geom_line(aes(x = x, y = forecast, col = "Forecast"))
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
+  labs(title = paste0("Cubic Smoothing Spline "),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_cspline_test)), "; Training RMSE: ", round(sqrt(mse_cspline_train))), 
+       x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
+                     labels=c("Training","Forecast")) + 
+  scale_fill_manual("95% PI", values = "grey12")
+ggsave(paste0(outputpath, "/cspline_forecast.png"), width = 8, height = 4)
 
 ######## EXPONENTIAL SMOOTHING #############
 
 # 1. this is not working without arma errors!!! chosen by AIC
-numbins <- 5
 day_train_forecast$bins_ets <- as.numeric(cut(day_train_forecast$dteday, numbins + 1))
 
 # some combinations will be invalid: skip
-cross_validate_tbats <- function(b, tr, dtr, ar, numbins = 5) {
+cross_validate_tbats <- function(b, tr, dtr, ar, nbin = numbins) {
 
   mse_cv <- c()
   
-  for(i in 1:numbins) {
+  for(i in 1:nbin) {
     
     
     train <- day_train_forecast[bins <= i, ]
@@ -291,10 +198,7 @@ cross_validate_tbats <- function(b, tr, dtr, ar, numbins = 5) {
     
     
   }
-  print(mean(mse_cv))
   return(mean(mse_cv))
-
-  
 }
 
 eval_true_matrix_input <- function(input) {
@@ -338,46 +242,126 @@ for(b in use_boxcox) {
 # what's the best model? 
 mse_tbats[which.min(mse_tbats[, 5]), ]
 
-
-# far2 <- function(x, h){forecast(tbats(x), h=h)}
-# e <- tsCV(ts_cnt, far2, h=nrow(day_test_forecast), window = 30)
-
 # refit best model on entire training set and forecast on test set
 ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5, 365.25))
-mod <- tbats(ts_cnt, use.trend = FALSE, use.damped.trend = TRUE,
+best_tbats <- tbats(ts_cnt, use.trend = FALSE, use.damped.trend = TRUE,
              use.arma.errors = FALSE)
-forecast_mod_tbats <- forecast(mod, h = nrow(day_test_forecast))
+forecast_mod_tbats <- forecast(best_tbats, h = nrow(day_test_forecast))
 
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
 results[, test := ifelse(x <= "2012-11-30", 0, 1)]
-results[, fitted := ifelse(test == 0, mod$fitted.values, NA)]
-results[, forecast := ifelse(test == 1, 
-                             forecast(mod, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)],
-                             NA)]
+results[test == 0, fitted := best_tbats$fitted.values]
+results[test == 1, forecast := forecast_mod_tbats$mean[1:nrow(day_test_forecast)]]
+results[test == 1, upper_ci := forecast_mod_tbats$upper[1:nrow(day_test_forecast)]]
+results[test == 1, lower_ci := forecast_mod_tbats$lower[1:nrow(day_test_forecast)]]
 
-mse_tbats_test <- mean((day_test_forecast$cnt - forecast(mod, h = nrow(day_test_forecast))$mean[1:nrow(day_test_forecast)])^2)
-mse_tbats_train <- mean((day_train_forecast$cnt - mod$fitted)^2)
+mse_tbats_test <- mean((day_test_forecast$cnt - forecast_mod_tbats$mean[1:nrow(day_test_forecast)])^2)
+mse_tbats_train <- mean((day_train_forecast$cnt - best_tbats$fitted)^2)
 
 results %>% 
-  ggplot(aes(x = x, y = y)) + geom_point() +
+  ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
-  geom_line(aes(x = x, y = forecast, col = "Forecast"))
-ggsave()
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
+  labs(title = paste0("TBATS with Box-Cox, Damped Trend and Weekly, Monthly and Yearly Seasonality"),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_tbats_test)), "; Training RMSE: ", round(sqrt(mse_tbats_train))), 
+       x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
+                     labels=c("Training","Forecast")) + 
+  scale_fill_manual("95% PI", values = "grey12")
+ggsave(paste0(outputpath, "/tbats_forecast.png"), width = 8, height = 4)
 
 
-plot(forecast_mod_tbats, main = "Best TBATS CV",sub = paste0("Training MSE: ", mse_tbats_train, 
-                                      "; Test MSE: ", mse_tbats_test))
-lines(mod$fitted.values, col = 4)
+################## MLP ########################
 
 # Fit MLP
-mlp.fit <- mlp(y)
-frc <- forecast(mlp.fit,h=nrow(day_test_forecast))
-plot(frc)
+ts_cnt <- ts(day_train_forecast$cnt)
+mlp_fit <- mlp(ts_cnt)
+mlp_forecast <- forecast(mlp_fit,h=nrow(day_test_forecast))
+plot(mlp_forecast)
 
-fit6 <- elm(y)
-frc <- forecast(fit6,h=nrow(day_test_forecast))
-plot(frc)
+# currenlty only plotting predictions!!!
+
+results <- data.table(x = day_test_forecast$dteday)
+results[, y := day_test_forecast$cnt]
+results[, forecast :=  mlp_forecast$mean[1:nrow(day_test_forecast)]]
+#results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+#results[test == 0, fitted := c(rep(NA, 4), mlp_fit$fitted)]
+#results[test == 1, forecast := mlp_forecast$mean[1:nrow(day_test_forecast)]]
+#results[test == 1, upper_ci := forecast_mod_tbats$upper[1:nrow(day_test_forecast)]]
+#results[test == 1, lower_ci := forecast_mod_tbats$lower[1:nrow(day_test_forecast)]]
+#mse_mlp_train <- mean((day_train_forecast[5:nrow(day_train_forecast)]$cnt - mlp_fit$fitted)^2)
+
+mse_mlp_test <- mean((day_test_forecast$cnt - mlp_forecast$mean[1:nrow(day_test_forecast)])^2)
+
+results %>% 
+  ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  labs(title = paste0("MLP with 5 hidden nodes and 20 repetitions"),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_mlp_test))), 
+       x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  scale_color_manual(name="", values=c(cols[[2]]),
+                     labels=c("Forecast"))  
+ggsave(paste0(outputpath, "/mlp_forecast.png"), width = 8, height = 4)
 
 
+# Fit ELM
+ts_cnt <- ts(day_train_forecast$cnt)
+elm_fit <- elm(ts_cnt)
+elm_forecast <- forecast(elm_fit,h=nrow(day_test_forecast))
+plot(elm_forecast)
 
+
+results <- data.table(x = day_test_forecast$dteday)
+results[, y := day_test_forecast$cnt]
+results[, forecast :=  elm_forecast$mean[1:nrow(day_test_forecast)]]
+#results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+#results[test == 0, fitted := c(rep(NA, 4), mlp_fit$fitted)]
+#results[test == 1, forecast := mlp_forecast$mean[1:nrow(day_test_forecast)]]
+#results[test == 1, upper_ci := forecast_mod_tbats$upper[1:nrow(day_test_forecast)]]
+#results[test == 1, lower_ci := forecast_mod_tbats$lower[1:nrow(day_test_forecast)]]
+#mse_mlp_train <- mean((day_train_forecast[5:nrow(day_train_forecast)]$cnt - mlp_fit$fitted)^2)
+
+mse_elm_test <- mean((day_test_forecast$cnt - elm_forecast$mean[1:nrow(day_test_forecast)])^2)
+
+results %>% 
+  ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  labs(title = paste0("ELM with 100 hidden nodes and 20 repetitions"),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_elm_test))), 
+       x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  scale_color_manual(name="", values=c(cols[[2]]),
+                     labels=c("Forecast"))  
+ggsave(paste0(outputpath, "/elm_forecast.png"), width = 8, height = 4)
+
+############### NNETAR ###############
+
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5, 365.25))
+nn <- nnetar(ts_cnt)
+nn_forecast <- forecast(nn,h=nrow(day_test_forecast))
+plot(nn_forecast)
+
+results <- data.table(x = day_test_forecast$dteday)
+results[, y := day_test_forecast$cnt]
+results[, forecast :=  nn_forecast$mean[1:nrow(day_test_forecast)]]
+
+mse_elm_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
+
+results %>% 
+  ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  labs(title = paste0("Feed-Forward NN; Single Hidden Layer"),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_elm_test))), 
+       x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  scale_color_manual(name="", values=c(cols[[2]]),
+                     labels=c("Forecast"))  
+ggsave(paste0(outputpath, "/nn_forecast.png"), width = 8, height = 4)
