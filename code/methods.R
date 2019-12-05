@@ -200,7 +200,8 @@ results %>%
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   #geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
   labs(title = paste0("Seasonal (Weekly) Decomposition using LOESS: Forecast using Naive Random Walk"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_stl_test)), "; Training RMSE: ", round(sqrt(mse_gaussian_train))), 
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_stl_test)), 
+                         "; Training RMSE: ", round(sqrt(mse_stl_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
@@ -209,79 +210,97 @@ results %>%
   scale_fill_manual("95% PI", values = "grey12")
 ggsave(paste0(outputpath, "/stl_loess_forecast_test.png"), width = 8, height = 4)
 
-################ ... loess smoothing (no forecast) #############
+################ ... loess smoothing  #############
 
-#degree of local polynomials: 0, 1, 2: cross validate
-# in training data: cross validate span
-mse_order <- matrix(nrow = 3, ncol = 3)
+numbins <- 15
+day_train_forecast$bins <- as.numeric(cut(day_train_forecast$dteday, numbins + 1))
 
-for(d in 0:2) {
+# nax degree of polynomial
+degree_max <- 2
+
+mse_order <- matrix(nrow = degree_max + 1, ncol = 3)
+
+for(d in 0:degree_max) {
   
+  mse_cv <- c()
   
-  loess_cv <- loess.as(day_train_forecast$index,
-                       day_train_forecast$cnt,
-                       criterion = "gcv", 
-                       degree = d)
-  loess_cv_span <- loess_cv$pars$span
-  
-  # apply to test data 
-  loess_test <- loess.as(day_test_forecast$index, 
-                         day_test_forecast$cnt, 
-                         user.span = loess_cv_span, 
+  for(i in 1:numbins) {
+    
+    train <- day_train_forecast[bins <= i, ]
+    test <- day_train_forecast[bins == i + 1, ]
+    
+    # run on train; span is gcv
+    loess_cv <- loess.as(train$instant,
+                         train$cnt,
+                         criterion = "gcv", 
                          degree = d)
-  
-  # calcualte mse 
-  mse_cv <- mean((day_test_forecast$cnt -  loess_test$fitted)^2)
-  
+    loess_cv_span <- loess_cv$pars$span
+    
+    # predict to test data 
+    loess_test <- predict(loess_cv, test)
+    # loess_test <- loess.as(test$index, 
+    #                        test$cnt, 
+    #                        user.span = loess_cv_span, 
+    #                        degree = d)
+    
+    # calcualte mse 
+    mse_cv[i] <- mean((test$cnt -  loess_test)^2)
+    
+
+  }
   
   mse_order[d + 1, 1] <- d
-  mse_order[d + 1, 2] <- mse_cv
+  mse_order[d + 1, 2] <- mean(mse_cv)
   mse_order[d + 1, 3] <- loess_cv_span
+  
 }
+
+# which is the best simple moving average? 
+best_cv_order <- which.min(mse_order[, 2])
 
 # which is the degree
 best_degree <- which.min(mse_order[, 2]) - 1
 best_span <- mse_order[best_degree + 1, 3]
 
-# on training data 
-day[, index := .I]
-m <- loess.as(day$index, day$cnt)
+# run on train
+day_train_forecast_loess <- day_train_forecast[, c("instant", "cnt")]
+day_test_forecast_loess <- day_test_forecast[, c("instant", "cnt")]
 
-loess_train <- loess.as(day_train_forecast$index, 
-                        day_train_forecast$cnt, 
-                        user.span = best_span, 
-                        degree = best_degree)
+loess_cv <- loess(cnt ~ instant, 
+                  data = day_train_forecast_loess, 
+                  span = best_span, degree = best_degree, 
+                  control=loess.control(surface="direct"))
 
-# apply to test data 
-loess_entire <- loess.as(day$index, 
-                         day$cnt, 
-                         user.span = best_span, 
-                         degree = best_degree)
+# predict to test data 
+loess_test <- predict(loess_cv, day_test_forecast_loess)
 
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
 results[, test := ifelse(x <= "2012-11-30", 0, 1)]
-results[, fitted := loess_entire$fitted]
-results[test == 1, fitted_test := fitted]
-results[test == 0, fitted_train := fitted]
+results[test == 1, fitted_test := loess_test]
+results[test == 0, fitted_train := loess_cv$fitted]
 
-mse_loess_test <- mean((results[test == 1, ]$y - results[test == 1, ]$fitted)^2)
-mse_loess_train <- mean((results[test == 0, ]$y - results[test == 0, ]$fitted)^2)
+mse_loess_test <- mean((results[test == 1, ]$y - results[test == 1, ]$fitted_test)^2)
+mse_loess_train <- mean((results[test == 0, ]$y - results[test == 0, ]$fitted_train)^2)
+
 
 results %>% 
   ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
-  geom_line(aes(x = x, y = fitted_test, col = "Fitted Test")) + 
-  geom_line(aes(x = x, y = fitted_train, col = "Fitted Train")) + 
-  labs(title = paste0("Loess Smoothing (Cross-validated on Training Set)"),
+  geom_line(aes(x = x, y = fitted_train, col = "Fitted")) + 
+  geom_line(aes(x = x, y = fitted_test, col = "Forecast")) + 
+  labs(title = paste0("Loess"),
        subtitle = paste0("Test RMSE: ", round(sqrt(mse_loess_test)),
                          "; Training RMSE: ", round(sqrt(mse_loess_train)), 
-                         " (Smoothing Span: ", round(best_span, 3), "; Degree: ", best_degree, ")"), 
+                         " (Cross-Validated Smoothing Span: ", round(best_span, 3),
+                         "; Cross-Validated Degree: ", best_degree, ")"), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
-  scale_color_manual(name="", values=c(cols[[2]], cols[[1]]),
-                     labels=c("Test", "Training"))
+  theme(plot.title = element_text(hjust = 0.5), plot.subtitle =  element_text(hjust = 0.5)) + 
+  scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
+                     labels=c("Train","Test Forecast"))
 ggsave(paste0(outputpath, "/loess_smoothing.png"), width = 8, height = 4)
+
 
 ########## GAUSSIAN KERNEL ################# 
 
@@ -352,7 +371,8 @@ results %>%
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
   labs(title = paste0("Gausssian Kernel (CV) with Bandwidth ", best_cv_order),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_gaussian_test)), "; Training RMSE: ", round(sqrt(mse_gaussian_train))), 
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_gaussian_test)),
+                         "; Training RMSE: ", round(sqrt(mse_gaussian_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
@@ -437,13 +457,6 @@ results %>%
                      labels=c("Training","Forecast")) + 
   scale_fill_manual("95% PI", values = "grey12")
 ggsave(paste0(outputpath, "/boxcar_kernel_predict.png"), width = 8, height = 4)
-
-
-
-################# KNN #################### 
-
-
-
 
 
 ########## CUBIC SPLINES ################# 
@@ -785,29 +798,27 @@ ggsave(paste0(outputpath, "/sarimacovs_forecast.png"), width = 8, height = 4)
 
 # INCLUDE MORE REPEATS
 ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 365.25))
-nn <- nnetar(ts_cnt, xreg = as.matrix(day_train_forecast[, ..covs]), repeats = 10000)
-nn_forecast <- forecast(nn,h=nrow(day_test_forecast), xreg = as.matrix(day_test_forecast[, ..covs]))
-plot(nn_forecast)
+nn_covs <- nnetar(ts_cnt, xreg = as.matrix(day_train_forecast[, ..covs]), repeats = 10000)
+nn_forecast_covs <- forecast(nn_covs,h=nrow(day_test_forecast), xreg = as.matrix(day_test_forecast[, ..covs]))
+plot(nn_forecast_covs)
 
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
 results[, instant := day$instant]
 results[, test := ifelse(x <= "2012-11-30", 0, 1)]
-results[test == 0, fitted := nn$fitted]
-results[test == 1, forecast := fcast_sarima$mean[1:nrow(day_test_forecast)]]
-results[test == 1, upper_ci := fcast_sarima$upper[1:nrow(day_test_forecast), 2]]
-results[test == 1, lower_ci := fcast_sarima$lower[1:nrow(day_test_forecast), 2]]
+results[test == 0, fitted := nn_covs$fitted]
+results[test == 1, forecast := nn_forecast_covs$mean[1:nrow(day_test_forecast)]]
 
 
-mse_nn_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
-mse_nn_train <- mean((day_train_forecast[index >= 366, ]$cnt - nn$fitted[366:length(nn$fitted)])^2)
+mse_nn_test_covs <- mean((day_test_forecast$cnt - nn_forecast_covs$mean[1:nrow(day_test_forecast)])^2)
+mse_nn_train_covs <- mean((day_train_forecast[index >= 366, ]$cnt - nn_covs$fitted[366:length(nn_covs$fitted)])^2)
 
 results %>% 
   ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; With Covariates"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test)), " Training MSE: ",  round(sqrt(mse_nn_train))), 
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test_covs)), " Training MSE: ",  round(sqrt(mse_nn_train_covs))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
@@ -829,9 +840,7 @@ results[, y := day$cnt]
 results[, instant := day$instant]
 results[, test := ifelse(x <= "2012-11-30", 0, 1)]
 results[test == 0, fitted := nn$fitted]
-results[test == 1, forecast := fcast_sarima$mean[1:nrow(day_test_forecast)]]
-results[test == 1, upper_ci := fcast_sarima$upper[1:nrow(day_test_forecast), 2]]
-results[test == 1, lower_ci := fcast_sarima$lower[1:nrow(day_test_forecast), 2]]
+results[test == 1, forecast := nn_forecast$mean[1:nrow(day_test_forecast)]]
 
 mse_nn_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
 mse_nn_train <- mean((day_train_forecast[index >= 366, ]$cnt - nn$fitted[366:length(nn$fitted)])^2)
