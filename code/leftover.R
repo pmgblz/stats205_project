@@ -270,3 +270,208 @@ class(fit2) <- c("Arima", "forecast_ARIMA", "ARIMA")
 
 
 
+################## Multilayer Perceptrons (MLP): MULTIVARIATE ########################
+
+# Fit MLP (trianing data does not have full 2 years, so only monthyly and weekly seasonality)
+ts_cnt <- ts(day_train_forecast$cnt)
+mlp_fit <- mlp(ts_cnt, xreg = day_train_forecast[, ..covs], 
+               allow.det.season = TRUE)
+mlp_forecast <- forecast(mlp_fit, h = nrow(day_test_forecast), xreg = day[, ..covs])
+
+plot(mlp_fit)
+
+# currenlty only plotting predictions!!!
+
+results <- data.table(x = day_test_forecast$dteday)
+results[, y := day_test_forecast$cnt]
+results[, forecast :=  mlp_forecast$mean[1:nrow(day_test_forecast)]]
+#results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+#results[test == 0, fitted := c(rep(NA, 4), mlp_fit$fitted)]
+#results[test == 1, forecast := mlp_forecast$mean[1:nrow(day_test_forecast)]]
+#results[test == 1, upper_ci := forecast_mod_tbats$upper[1:nrow(day_test_forecast)]]
+#results[test == 1, lower_ci := forecast_mod_tbats$lower[1:nrow(day_test_forecast)]]
+#mse_mlp_train <- mean((day_train_forecast[5:nrow(day_train_forecast)]$cnt - mlp_fit$fitted)^2)
+
+mse_mlp_test <- mean((day_test_forecast$cnt - mlp_forecast$mean[1:nrow(day_test_forecast)])^2)
+
+results %>% 
+  ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  labs(title = paste0("MLP with 5 hidden nodes and 20 repetitions"),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_mlp_test))), 
+       x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  scale_color_manual(name="", values=c(cols[[2]]),
+                     labels=c("Forecast"))  
+ggsave(paste0(outputpath, "/mlp_forecast.png"), width = 8, height = 4)
+
+##################  Extreme Learning Machine (ELM) ########################
+
+ts_cnt <- ts(day_train_forecast$cnt)
+elm_fit <- elm(ts_cnt)
+elm_forecast <- forecast(elm_fit,h=nrow(day_test_forecast))
+plot(elm_forecast)
+
+
+results <- data.table(x = day_test_forecast$dteday)
+results[, y := day_test_forecast$cnt]
+results[, forecast :=  elm_forecast$mean[1:nrow(day_test_forecast)]]
+results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+results[test == 0, fitted := c(rep(NA, 4), mlp_fit$fitted)]
+#results[test == 1, forecast := mlp_forecast$mean[1:nrow(day_test_forecast)]]
+#results[test == 1, upper_ci := forecast_mod_tbats$upper[1:nrow(day_test_forecast)]]
+#results[test == 1, lower_ci := forecast_mod_tbats$lower[1:nrow(day_test_forecast)]]
+#mse_mlp_train <- mean((day_train_forecast[5:nrow(day_train_forecast)]$cnt - mlp_fit$fitted)^2)
+
+mse_elm_test <- mean((day_test_forecast$cnt - elm_forecast$mean[1:nrow(day_test_forecast)])^2)
+
+results %>% 
+  ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  labs(title = paste0("ELM with 100 hidden nodes and 20 repetitions"),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_elm_test))), 
+       x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  scale_color_manual(name="", values=c(cols[[2]]),
+                     labels=c("Forecast"))  
+ggsave(paste0(outputpath, "/elm_forecast.png"), width = 8, height = 4)
+
+
+################# SELECTING LAGS USING DIMENSION REDUCTION #################### 
+
+# Step 1: Create ALL POSSIBLE Lags
+day_train_forecast_lags <- day_train_forecast
+max_lag <- nrow(day_train_forecast_lags) - 1
+day_train_forecast_lags[, paste0("cnt_lag", seq(1:max_lag)) := shift(cnt, 1:max_lag) ]
+
+day_train_forecast_lags <- day_train_forecast_lags[, -c("casual", "registered", "index", "dteday", "cnt", "instant", "bins")]
+x <- model.matrix(cnt~., day_train_forecast_lags)[,-1]
+
+
+x <- as.matrix(day_train_forecast_lags)
+y <- as.vector(day_train_forecast$cnt)
+
+
+myvars <- colnames(day_train_forecast_lags)[!colnames(day_train_forecast_lags) %in% "cnt"]
+myformula <- as.formula(paste("cnt", paste(myvars, collapse=" + "), sep=" ~ "))
+
+# 
+attach(day_train_forecast_lags)
+dwtest(myformula)
+detach(day_train_forecast_lags)
+############ ... LASSO #####################
+lasso <- glmnet(x, y, alpha = 1)
+
+lasso.pred <- predict(lasso.mod, s = bestlam, newx = x[test,])
+mean((lasso.pred-ytest)^2)
+
+
+x <- as.matrix(day_train_forecast[, ..covs])
+y <- as.vector(day_train_forecast$cnt)
+
+
+krr(x, y)
+
+
+
+x <- as.matrix(day_train_forecast[, ..covs])
+y <- as.vector(day_train_forecast$cnt)
+
+x <- as.matrix(test[, ..covs])
+y <- as.vector(day_train_forecast$cnt)
+
+kkrr_test <- krr(x, y)
+
+# Step 1: Create ALL POSSIBLE Lags
+day_train_forecast_lags <- day_train_forecast
+max_lag <- nrow(day_train_forecast_lags) - 1
+day_train_forecast_lags[, paste0("cnt_lag", seq(1:max_lag)) := shift(cnt, 1:max_lag) ]
+
+day_train_forecast_lags <- day_train_forecast_lags[, -c("casual", "registered", "index", "dteday", "cnt", "instant", "bins")]
+x <- model.matrix(cnt~., day_train_forecast_lags)[,-1]
+
+
+x <- as.matrix(day_train_forecast_lags)
+y <- as.vector(day_train_forecast$cnt)
+
+# create matrix with lags of test data
+xnew <- day_test_forecast[, -c("casual", "registered", "index", "dteday", "cnt", "instant")]
+
+ynew <- predict(kkrr_test, xnew)
+
+
+########## PCA ################# 
+
+pca_covariates <- prcomp(day_train_forecast[, ..covs], scale = TRUE, center = TRUE)
+summary(pca_covariates)
+
+# get principal component score vectors 
+pc_score_vectors <- as.data.table(pca_covariates$x)
+pca1_covs <- pc_score_vectors$PC1
+
+############ ... RIDGE #####################
+
+############ ... ELASTIC NET #####################
+
+############ ... Kernel Ridge Regression #####################
+
+
+############ ... Kernel Ridge Regression #####################
+
+
+
+loess_data <- day_train_forecast[, c("index", "cnt")]
+loess_data_test <- day_test_forecast[, c("index", "cnt")]
+
+loess_cv <- loess.as(loess_data$index,
+                     loess_data$cnt,
+                     criterion = "gcv", 
+                     degree = d)
+loess_cv_span <- loess_cv$pars$span
+
+# refit using best cv span
+loess_cv <- loess(cnt ~ index, 
+                  data = day_train_forecast, 
+                  span = loess_cv_span, degree = d)
+
+loess_fitted <- predict(loess_cv, day_test_forecast)
+
+# calcualte mse 
+mse_cv <- mean((day_test_forecast$cnt - loess_fitted)^2)
+
+
+mse_order[d + 1, 1] <- d
+mse_order[d + 1, 2] <- mse_cv
+mse_order[d + 1, 3] <- loess_cv_span
+
+
+# #degree of local polynomials: 0, 1, 2: cross validate
+# # in training data: cross validate span
+# mse_order <- matrix(nrow = 3, ncol = 3)
+# 
+# for(d in 0:2) {
+#   
+#   
+#   loess_cv <- loess.as(day_train_forecast$index,
+#                        day_train_forecast$cnt,
+#                        criterion = "gcv", 
+#                        degree = d)
+#   loess_cv_span <- loess_cv$pars$span
+#   
+#   # apply to test data 
+#   loess_test <- loess.as(day_test_forecast$index, 
+#                          day_test_forecast$cnt, 
+#                          user.span = loess_cv_span, 
+#                          degree = d)
+#   
+#   # calcualte mse 
+#   mse_cv <- mean((day_test_forecast$cnt -  loess_test$fitted)^2)
+#   
+#   
+#   mse_order[d + 1, 1] <- d
+#   mse_order[d + 1, 2] <- mse_cv
+#   mse_order[d + 1, 3] <- loess_cv_span
+# }
+
