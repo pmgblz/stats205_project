@@ -38,7 +38,9 @@ library(fANCOVA)
 library(kedd)
 library(smooth)
 library(Mcomp)
-
+library(purrr)
+library(rlang)
+library(tsfknn)
 
 # Run path
 if (dir.exists("/Users/paula/stats205_project/")) {
@@ -58,9 +60,9 @@ cols <- c("steelblue4", "goldenrod2", "grey4")
 covs <- c("season", "yr", "mnth", "holiday", "weekday",
           "workingday", "weathersit", "temp", "atemp", "hum", "windspeed")
 
-############# AUTOCORRELATION OF RESIDUALS ########
-
-
+# covs <- c("season.Fall", "season.Spring", "season.Summer", "season.Winter", "yr", "mnth", "holiday", "weekday",
+#           "workingday", "weathersit.Clear", "weathersit.Misty", "weathersit.Rain" , 
+#           "temp", "atemp", "hum", "windspeed")
 
 ######## TEST & TRAIN DATA ###########
 set.seed(1)
@@ -68,9 +70,14 @@ set.seed(1)
 train_fraction <- 0.8
 
 # Day; test = last month (make sure it is ordered)
+day <- day[order(day$dteday),]
 day_train_forecast <- day[dteday <= "2012-11-30", ]
+day_train_forecast <- day_train_forecast[order(day_train_forecast$dteday),]
 day_test_forecast <- day[dteday > "2012-11-30", ]
+day_test_forecast <- day_test_forecast[order(day_test_forecast$dteday),]
 
+day_train_forecast[, index := .I]
+day_test_forecast[, index := .I]
 # day_train_forecast <- day[1:round(nrow(day)*train_fraction), ]
 # day_test_forecast <- day[(round(nrow(day)*train_fraction) + 1):nrow(day), ]
 
@@ -127,6 +134,7 @@ mse_sma_test <- mean((day_test_forecast$cnt - fcast_sma$mean[1:nrow(day_test_for
 mse_sma_train <- mean((day_train_forecast$cnt - best_sma$fitted)^2)
 
 
+
 results %>% 
   ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
@@ -138,7 +146,7 @@ results %>%
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
   scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
-                    labels=c("Training","Forecast")) + 
+                     labels=c("Training","Forecast")) + 
   scale_fill_manual("Non-parametric 95% PI", values = "grey12")
 ggsave(paste0(outputpath, "/sma_forecast.png"), width = 8, height = 4)
 
@@ -147,17 +155,17 @@ ggsave(paste0(outputpath, "/sma_forecast.png"), width = 8, height = 4)
 
 
 ################ ... stl forecast #############
-ts_cnt <- msts(day$cnt, seasonal.periods=c(7, 30.5, 365.25))
-loes_decomp <- mstl(ts_cnt)
+ts_cnt <- msts(day$cnt, seasonal.periods=c(7, 365.25))
+loess_decomp <- mstl(ts_cnt)
 png(filename="output/plots/mstl_whole_data.png")
-plot(loes_decomp, main = "Seasonal (Weekly & Monthly) Decomposition using LOESS on Entire Dataset")
+plot(loess_decomp, main = "Seasonal (Weekly & Monthly) Decomposition using LOESS on Entire Dataset")
 dev.off()
 
 # seasonal decomposition using loess
 # takes seasonality into account
 # no yearly seasonality since less than 2 years of data
-ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5))
-loes_decomp <- mstl(ts_cnt)
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7))
+loess_decomp <- mstl(ts_cnt, s.window = 7)
 
 png(filename="output/plots/mstl_training_data.png")
 plot(loess_decomp, main = "Seasonal (Weekly & Monthly) Decomposition using LOESS on Training Data")
@@ -198,25 +206,25 @@ mse_order <- matrix(nrow = 3, ncol = 3)
 for(d in 0:2) {
   
   
-    loess_cv <- loess.as(day_train_forecast$index,
-                         day_train_forecast$cnt,
-                         criterion = "gcv", 
-                         degree = d)
-    loess_cv_span <- loess_cv$pars$span
-    
-    # apply to test data 
-    loess_test <- loess.as(day_test_forecast$index, 
-                           day_test_forecast$cnt, 
-                           user.span = loess_cv_span, 
-                           degree = d)
-
-    # calcualte mse 
-    mse_cv <- mean((day_test_forecast$cnt -  loess_test$fitted)^2)
-    
+  loess_cv <- loess.as(day_train_forecast$index,
+                       day_train_forecast$cnt,
+                       criterion = "gcv", 
+                       degree = d)
+  loess_cv_span <- loess_cv$pars$span
   
-    mse_order[d + 1, 1] <- d
-    mse_order[d + 1, 2] <- mse_cv
-    mse_order[d + 1, 3] <- loess_cv_span
+  # apply to test data 
+  loess_test <- loess.as(day_test_forecast$index, 
+                         day_test_forecast$cnt, 
+                         user.span = loess_cv_span, 
+                         degree = d)
+  
+  # calcualte mse 
+  mse_cv <- mean((day_test_forecast$cnt -  loess_test$fitted)^2)
+  
+  
+  mse_order[d + 1, 1] <- d
+  mse_order[d + 1, 2] <- mse_cv
+  mse_order[d + 1, 3] <- loess_cv_span
 }
 
 # which is the degree
@@ -229,14 +237,14 @@ m <- loess.as(day$index, day$cnt)
 
 loess_train <- loess.as(day_train_forecast$index, 
                         day_train_forecast$cnt, 
-                       user.span = best_span, 
-                       degree = best_degree)
+                        user.span = best_span, 
+                        degree = best_degree)
 
 # apply to test data 
 loess_entire <- loess.as(day$index, 
                          day$cnt, 
-                       user.span = best_span, 
-                       degree = best_degree)
+                         user.span = best_span, 
+                         degree = best_degree)
 
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
@@ -263,18 +271,7 @@ results %>%
                      labels=c("Test", "Training"))
 ggsave(paste0(outputpath, "/loess_smoothing.png"), width = 8, height = 4)
 
-
-########## PCA ################# 
-
-pca_covariates <- prcomp(day_train_forecast[, ..covs], scale = TRUE, center = TRUE)
-summary(pca_covariates)
-
-# get principal component score vectors 
-pc_score_vectors <- as.data.table(pca_covariates$x)
-pca1_covs <- pc_score_vectors$PC1
-
 ########## GAUSSIAN KERNEL ################# 
-
 
 ########## ... based on index ############
 
@@ -302,7 +299,7 @@ for(o in 1:order_max) {
     # hold out set is length of training set
     mod <- ksmooth(train$index, train$cnt, "normal", bandwidth = o)
     pred_test <- predict(mod, h = nrow(test))
-
+    
     # calcualte mse 
     mse_cv[i] <- mean((test$cnt -  pred_test$y$mean[1:nrow(test)])^2)
     
@@ -318,9 +315,9 @@ best_cv_order <- which.min(mse_order[, 2])
 
 # refit with best cv order (and predict on test set)
 best_gaussian <- ksmooth(day_train_forecast$index,
-                    day_train_forecast$cnt,
-                    "normal", 
-                    bandwidth = best_cv_order)
+                         day_train_forecast$cnt,
+                         "normal", 
+                         bandwidth = best_cv_order)
 
 fcast_gaussian <- predict(best_gaussian, h = nrow(day_test_forecast))
 
@@ -333,8 +330,8 @@ results[test == 1, forecast := fcast_gaussian$y$mean[1:nrow(day_test_forecast)]]
 results[test == 1, lower_ci := fcast_gaussian$y$lower[1:nrow(day_test_forecast), 2]]
 results[test == 1, upper_ci := fcast_gaussian$y$upper[1:nrow(day_test_forecast), 2]]
 
-mse_sma_test <- mean((day_test_forecast$cnt - fcast_gaussian$y$mean[1:nrow(day_test_forecast)])^2)
-mse_sma_train <- mean((day_train_forecast$cnt - best_gaussian$y)^2)
+mse_gaussian_test <- mean((day_test_forecast$cnt - fcast_gaussian$y$mean[1:nrow(day_test_forecast)])^2)
+mse_gaussian_train <- mean((day_train_forecast$cnt - best_gaussian$y)^2)
 
 
 results %>% 
@@ -343,7 +340,7 @@ results %>%
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
   labs(title = paste0("Gausssian Kernel (CV) with Bandwidth ", best_cv_order),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_sma_test)), "; Training RMSE: ", round(sqrt(mse_sma_train))), 
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_gaussian_test)), "; Training RMSE: ", round(sqrt(mse_gaussian_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
@@ -395,9 +392,9 @@ best_cv_order <- which.min(mse_order[, 2])
 
 # refit with best cv order (and predict on test set)
 best_boxcar <- ksmooth(day_train_forecast$index,
-                         day_train_forecast$cnt,
-                         "box", 
-                         bandwidth = best_cv_order)
+                       day_train_forecast$cnt,
+                       "box", 
+                       bandwidth = best_cv_order)
 
 fcast_boxcar <- predict(best_boxcar, h = nrow(day_test_forecast))
 
@@ -410,8 +407,8 @@ results[test == 1, forecast := fcast_boxcar$y$mean[1:nrow(day_test_forecast)]]
 results[test == 1, lower_ci := fcast_boxcar$y$lower[1:nrow(day_test_forecast), 2]]
 results[test == 1, upper_ci := fcast_boxcar$y$upper[1:nrow(day_test_forecast), 2]]
 
-mse_sma_test <- mean((day_test_forecast$cnt - fcast_boxcar$y$mean[1:nrow(day_test_forecast)])^2)
-mse_sma_train <- mean((day_train_forecast$cnt - best_boxcar$y)^2)
+mse_boxcar_test <- mean((day_test_forecast$cnt - fcast_boxcar$y$mean[1:nrow(day_test_forecast)])^2)
+mse_boxcar_train <- mean((day_train_forecast$cnt - best_boxcar$y)^2)
 
 
 results %>% 
@@ -420,7 +417,7 @@ results %>%
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
   labs(title = paste0("Boxcar Kernel (CV) with Bandwidth ", best_cv_order),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_sma_test)), "; Training RMSE: ", round(sqrt(mse_sma_train))), 
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_boxcar_test)), "; Training RMSE: ", round(sqrt(mse_boxcar_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
@@ -430,12 +427,19 @@ results %>%
 ggsave(paste0(outputpath, "/boxcar_kernel_predict.png"), width = 8, height = 4)
 
 
+
+################# KNN #################### 
+
+
+
+
+
 ########## CUBIC SPLINES ################# 
 
 # this does cross validation: https://www.rdocumentation.org/packages/forecast/versions/8.9/topics/splinef
 # same as arima (0, 2, 2)
 # shown how cubic smoothing splines can be used to obtain local linear forecasts for a univariate time series
-ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5, 365.25))
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 365.25))
 cubic_smoothing_spline <- splinef(ts_cnt,  h = nrow(day_test_forecast))
 fcast_cubic_spline <- forecast(cubic_smoothing_spline,  h = nrow(day_test_forecast))
 plot(fcast_cubic_spline)
@@ -476,7 +480,7 @@ ggsave(paste0(outputpath, "/cspline_forecast.png"), width = 8, height = 4)
 
 # some combinations will be invalid: skip
 cross_validate_tbats <- function(b, tr, dtr, ar, nbin = numbins) {
-
+  
   mse_cv <- c()
   
   for(i in 1:nbin) {
@@ -489,7 +493,8 @@ cross_validate_tbats <- function(b, tr, dtr, ar, nbin = numbins) {
     # hold out set is length of training set
     
     #mod <- ets(ts_cnt, model = paste0(er, tr, sea))
-    ts_cnt <- msts(train$cnt, seasonal.periods=c(7, 30.5, 365.25))
+    # not a year or data!
+    ts_cnt <- msts(train$cnt, seasonal.periods=c(7, 365.25))
     mod <- tbats(ts_cnt, use.box.cox = b, use.trend = tr, 
                  use.damped.trend = dtr, use.arma.errors = ar)
     
@@ -508,12 +513,12 @@ eval_true_matrix_input <- function(input) {
   }
 }
 
-  
+
 use_boxcox <- c(TRUE, FALSE)
 use_trend <- c(TRUE, FALSE)
 use_damped_trend <- c(TRUE, FALSE)
-use_arma_errors <- c(TRUE, FALSE) # onlye working with TRUE!
-  
+use_arma_errors <- c(TRUE, FALSE) 
+
 mse_tbats <- matrix(nrow = 16, ncol = 5)
 c <- 0
 for(b in use_boxcox) {
@@ -521,15 +526,15 @@ for(b in use_boxcox) {
     for(dtr in use_damped_trend) {
       for(ar in use_arma_errors) {
         
-          c <- c + 1
+        c <- c + 1
         
-          mse_tbats[c, 1] <- eval_true_matrix_input(b)
-          mse_tbats[c, 2] <- eval_true_matrix_input(tr)
-          mse_tbats[c, 3] <- eval_true_matrix_input(dtr)
-          mse_tbats[c, 4] <- eval_true_matrix_input(ar)
-
+        mse_tbats[c, 1] <- eval_true_matrix_input(b)
+        mse_tbats[c, 2] <- eval_true_matrix_input(tr)
+        mse_tbats[c, 3] <- eval_true_matrix_input(dtr)
+        mse_tbats[c, 4] <- eval_true_matrix_input(ar)
         
-          mse_tbats[c, 5] <- cross_validate_tbats(b = b, tr = tr, dtr = dtr, ar = ar)
+        
+        mse_tbats[c, 5] <- cross_validate_tbats(b = b, tr = tr, dtr = dtr, ar = ar)
         
       }
     }
@@ -542,9 +547,10 @@ for(b in use_boxcox) {
 mse_tbats[which.min(mse_tbats[, 5]), ]
 
 # refit best model on entire training set and forecast on test set
-ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5, 365.25))
+# not more than ayear of data , 365.25
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 365.25))
 best_tbats <- tbats(ts_cnt, use.trend = FALSE, use.damped.trend = TRUE,
-             use.arma.errors = FALSE)
+                    use.arma.errors = FALSE)
 forecast_mod_tbats <- forecast(best_tbats, h = nrow(day_test_forecast))
 
 results <- data.table(x = day$dteday)
@@ -578,63 +584,65 @@ ggsave(paste0(outputpath, "/tbats_forecast.png"), width = 8, height = 4)
 
 ######### ... univariate ############
 
-ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5))
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 365.25))
 
-p_order <- seq(0, 1)
-d_oder <- seq(0, 1)
-q_order <- seq(0, 1)
-
-P_season <- seq(0, 1)
-D_season <- seq(0, 1)
-Q_season <- seq(0, 1)
-
-mse_cv <- matrix(NA, nrow = length(p_order)^6, ncol = 7)
-
-count <- 0
-for(po in p_order) {
-  for(do in d_oder) {
-    for(qo in q_order) {
-      for(PS in P_season) {
-        for(DS in D_season) {
-          for(QS in Q_season) {
-              count <- count + 1
-              far2 <- function(x, h){forecast(Arima(x,
-                                                    order=c(po,do,qo),
-                                                    seasonal = c(PS, DS, QS)), h=h)}
-              mse_cv[count, 1] <- mean(tsCV(ts_cnt, far2, h=1)^2, na.rm = TRUE)
-              mse_cv[count, 2] <- po 
-              mse_cv[count, 3] <- do 
-              mse_cv[count, 4] <- qo 
-              mse_cv[count, 5] <- PS 
-              mse_cv[count, 6] <- DS 
-              mse_cv[count, 7] <- QS 
-              
-          }
-        }
-      }
-    }
-  }
-}
-
-# which is the best simple moving average? 
-best_cv_order <- which.min(mse_cv[, 1])
-
-best_p <- mse_cv[best_cv_order, 2]
-best_d <- mse_cv[best_cv_order, 3]
-best_q <- mse_cv[best_cv_order, 4]
-
-best_PS <- mse_cv[best_cv_order, 5]
-best_DS <- mse_cv[best_cv_order, 6]
-best_QS <- mse_cv[best_cv_order, 7]
+# p_order <- seq(0, 2)
+# d_oder <- seq(0, 2)
+# q_order <- seq(0, 2)
+# 
+# P_season <- seq(0, 2)
+# D_season <- seq(0, 2)
+# Q_season <- seq(0, 2)
+# 
+# mse_cv <- matrix(NA, nrow = length(p_order)^6, ncol = 7)
+# 
+# count <- 0
+# for(po in p_order) {
+#   for(do in d_oder) {
+#     for(qo in q_order) {
+#       for(PS in P_season) {
+#         for(DS in D_season) {
+#           for(QS in Q_season) {
+#               count <- count + 1
+#               far2 <- function(x, h){forecast(Arima(x,
+#                                                     order=c(po,do,qo),
+#                                                     seasonal = c(PS, DS, QS)), h=h)}
+#               mse_cv[count, 1] <- mean(tsCV(ts_cnt, far2, h=1)^2, na.rm = TRUE)
+#               mse_cv[count, 2] <- po 
+#               mse_cv[count, 3] <- do 
+#               mse_cv[count, 4] <- qo 
+#               mse_cv[count, 5] <- PS 
+#               mse_cv[count, 6] <- DS 
+#               mse_cv[count, 7] <- QS 
+#               
+#           }
+#         }
+#       }
+#     }
+#   }
+# }
+# 
+# # which is the best simple moving average? 
+# best_cv_order <- which.min(mse_cv[, 1])
+# 
+# best_p <- mse_cv[best_cv_order, 2]
+# best_d <- mse_cv[best_cv_order, 3]
+# best_q <- mse_cv[best_cv_order, 4]
+# 
+# best_PS <- mse_cv[best_cv_order, 5]
+# best_DS <- mse_cv[best_cv_order, 6]
+# best_QS <- mse_cv[best_cv_order, 7]
 
 
 # refit with best cv order (and predict on test set)
-best_sarima <- Arima(ts_cnt,
-                     order = c(best_p, best_d, best_q), 
-                     seasonal =   c(best_PS, best_DS, best_QS))
+# best_sarima <- Arima(ts_cnt,
+#                      order = c(best_p, best_d, best_q), 
+#                      seasonal =   c(best_PS, best_DS, best_QS))
 
+best_sarima <- auto.arima(ts_cnt)
 
 fcast_sarima <- forecast(best_sarima, h = nrow(day_test_forecast))
+plot(fcast_sarima)
 
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
@@ -652,9 +660,8 @@ results %>%
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
-  labs(title = paste0("Best (Seasonal) ARIMA: (", best_p, ",", best_d, "," , best_q, ") ", 
-                      "(", best_PS, ", ", best_DS, ", ", best_QS, ")"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_tbats_test)), "; Training RMSE: ", round(sqrt(mse_tbats_train))), 
+  labs(title = paste0("Best (Seasonal) ARIMA: ", fcast_sarima$method),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_sarima_test)), "; Training RMSE: ", round(sqrt(mse_sarima_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
@@ -664,69 +671,74 @@ results %>%
 ggsave(paste0(outputpath, "/sarima_forecast.png"), width = 8, height = 4)
 
 
+# best_p, ",", best_d, "," , best_q, ") ", 
+# "(", best_PS, ", ", best_DS, ", ", best_QS, ")"),
 ######### ... multivariate ############
 
-covariates <- as.matrix(day_train_forecast[, ..covs])
+# covariates <- as.matrix(day_train_forecast[, ..covs])
+# 
+# # less than a year of data
+# ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5))
+# 
+# p_order <- seq(0, 2)
+# d_oder <- seq(0, 2)
+# q_order <- seq(0, 2)
+# 
+# P_season <- seq(0, 2)
+# D_season <- seq(0, 2)
+# Q_season <- seq(0, 2)
+# 
+# mse_cv <- matrix(NA, nrow = length(p_order)^6, ncol = 7)
+# 
+# count <- 0
+# for(po in p_order) {
+#   for(do in d_oder) {
+#     for(qo in q_order) {
+#       for(PS in P_season) {
+#         for(DS in D_season) {
+#           for(QS in Q_season) {
+#             count <- count + 1
+#             far2 <- function(x, h){forecast(Arima(x, order=c(po,do,qo), 
+#                                             seasonal = c(PS, DS, QS), 
+#                                             xreg = covariates),
+#                                             h=h)}
+#             mse_cv[count, 1] <- mean(tsCV(ts_cnt, far2, h=1)^2, na.rm = TRUE)
+#             mse_cv[count, 2] <- po 
+#             mse_cv[count, 3] <- do 
+#             mse_cv[count, 4] <- qo 
+#             mse_cv[count, 5] <- PS 
+#             mse_cv[count, 6] <- DS 
+#             mse_cv[count, 7] <- QS 
+#             
+#           }
+#         }
+#       }
+#     }
+#   }
+# }
+# 
+# # which is the best simple moving average? 
+# best_cv_order <- which.min(mse_cv[, 1])
+# 
+# best_p <- mse_cv[best_cv_order, 2]
+# best_d <- mse_cv[best_cv_order, 3]
+# best_q <- mse_cv[best_cv_order, 4]
+# 
+# best_PS <- mse_cv[best_cv_order, 5]
+# best_DS <- mse_cv[best_cv_order, 6]
+# best_QS <- mse_cv[best_cv_order, 7]
+# 
+# 
+# # refit with best cv order (and predict on test set)
+# best_sarima_covs <- Arima(ts_cnt,
+#                      order = c(best_p, best_d, best_q), 
+#                      seasonal =   c(best_PS, best_DS, best_QS))
 
-# less than a year of data
-ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5))
+best_sarima_covs <- auto.arima(ts_cnt, xreg = as.matrix(day_train_forecast[, ..covs]))
 
-p_order <- seq(0, 1)
-d_oder <- seq(0, 1)
-q_order <- seq(0, 1)
-
-P_season <- seq(0, 1)
-D_season <- seq(0, 1)
-Q_season <- seq(0, 1)
-
-mse_cv <- matrix(NA, nrow = length(p_order)^6, ncol = 7)
-
-count <- 0
-for(po in p_order) {
-  for(do in d_oder) {
-    for(qo in q_order) {
-      for(PS in P_season) {
-        for(DS in D_season) {
-          for(QS in Q_season) {
-            count <- count + 1
-            far2 <- function(x, h){forecast(Arima(x, order=c(po,do,qo), 
-                                            seasonal = c(PS, DS, QS), 
-                                            xreg = covariates),
-                                            h=h)}
-            mse_cv[count, 1] <- mean(tsCV(ts_cnt, far2, h=1)^2, na.rm = TRUE)
-            mse_cv[count, 2] <- po 
-            mse_cv[count, 3] <- do 
-            mse_cv[count, 4] <- qo 
-            mse_cv[count, 5] <- PS 
-            mse_cv[count, 6] <- DS 
-            mse_cv[count, 7] <- QS 
-            
-          }
-        }
-      }
-    }
-  }
-}
-
-# which is the best simple moving average? 
-best_cv_order <- which.min(mse_cv[, 1])
-
-best_p <- mse_cv[best_cv_order, 2]
-best_d <- mse_cv[best_cv_order, 3]
-best_q <- mse_cv[best_cv_order, 4]
-
-best_PS <- mse_cv[best_cv_order, 5]
-best_DS <- mse_cv[best_cv_order, 6]
-best_QS <- mse_cv[best_cv_order, 7]
-
-
-# refit with best cv order (and predict on test set)
-best_sarima_covs <- Arima(ts_cnt,
-                     order = c(best_p, best_d, best_q), 
-                     seasonal =   c(best_PS, best_DS, best_QS))
-
-
-fcast_sarima_covs <- forecast(best_sarima, h = nrow(day_test_forecast))
+fcast_sarima_covs <- forecast(best_sarima_covs, 
+                              h = nrow(day_test_forecast),
+                              xreg = as.matrix(day_test_forecast[, ..covs]))
 
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
@@ -736,41 +748,32 @@ results[test == 1, forecast := fcast_sarima_covs$mean[1:nrow(day_test_forecast)]
 results[test == 1, upper_ci := fcast_sarima_covs$upper[1:nrow(day_test_forecast), 2]]
 results[test == 1, lower_ci := fcast_sarima_covs$lower[1:nrow(day_test_forecast), 2]]
 
-mse_sarima_test <- mean((day_test_forecast$cnt - fcast_sarima_covs$mean[1:nrow(day_test_forecast)])^2)
-mse_sarima_train <- mean((day_train_forecast$cnt - best_sarima_covs$fitted)^2)
+mse_sarimacovs_test <- mean((day_test_forecast$cnt - fcast_sarima_covs$mean[1:nrow(day_test_forecast)])^2)
+mse_sarimacovs_train <- mean((day_train_forecast$cnt - best_sarima_covs$fitted)^2)
 
 results %>% 
   ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
-  labs(title = paste0("Best (Seasonal) ARIMA with Covariates: (", best_p, ",", best_d, "," , best_q, ") ", 
-                      "(", best_PS, ", ", best_DS, ", ", best_QS, ")"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_tbats_test)), "; Training RMSE: ", round(sqrt(mse_tbats_train))), 
+  labs(title = paste0("Best (Seasonal) ARIMA: ", fcast_sarima_covs$method),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_sarimacovs_test)), "; Training RMSE: ", round(sqrt(mse_sarimacovs_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
   scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
                      labels=c("Training","Forecast")) + 
   scale_fill_manual("95% PI", values = "grey12")
-ggsave(paste0(outputpath, "/sarima_forecast.png"), width = 8, height = 4)
+ggsave(paste0(outputpath, "/sarimacovs_forecast.png"), width = 8, height = 4)
 
 
-covs_pred <- as.matrix(day_test_forecast[, c("temp", "hum", "windspeed", "holiday", 
-                                             "workingday", "weathersit")])
-fit <- auto.arima(ts_cnt, xreg = covs)
-autoplot(fit)
-fcast <- forecast(fit, xreg = covs_pred, h = nrow(day_test_forecast))
-plot(fcast)
-# calcualte mse
-rmse <- sqrt(mean((day_test_forecast$cnt - fcast$mean)^2))
-rmse
 ############### Neural Network Autoregression ###############
 
 ############## ... with covariates ##################
 
-ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5, 365.25))
-nn <- nnetar(ts_cnt, xreg = as.matrix(day_train_forecast[, ..covs]))
+# INCLUDE MORE REPEATS
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 365.25))
+nn <- nnetar(ts_cnt, xreg = as.matrix(day_train_forecast[, ..covs]), repeats = 10000)
 nn_forecast <- forecast(nn,h=nrow(day_test_forecast), xreg = as.matrix(day_test_forecast[, ..covs]))
 plot(nn_forecast)
 
@@ -778,13 +781,13 @@ results <- data.table(x = day_test_forecast$dteday)
 results[, y := day_test_forecast$cnt]
 results[, forecast :=  nn_forecast$mean[1:nrow(day_test_forecast)]]
 
-mse_elm_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
+mse_nn_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
 
 results %>% 
   ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; With Covariates"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_elm_test))), 
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
@@ -795,9 +798,8 @@ ggsave(paste0(outputpath, "/nn_forecast_covariates.png"), width = 8, height = 4)
 
 ############# ... without covariates #############
 
-
-ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 30.5, 365.25))
-nn <- nnetar(ts_cnt)
+ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 365.25))
+nn <- nnetar(ts_cnt, repeats = 10000)
 nn_forecast <- forecast(nn,h=nrow(day_test_forecast))
 plot(nn_forecast)
 
@@ -805,16 +807,51 @@ results <- data.table(x = day_test_forecast$dteday)
 results[, y := day_test_forecast$cnt]
 results[, forecast :=  nn_forecast$mean[1:nrow(day_test_forecast)]]
 
-mse_elm_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
+mse_nn_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
 
 results %>% 
   ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; Without Covariates"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_elm_test))), 
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
   scale_color_manual(name="", values=c(cols[[2]]),
                      labels=c("Forecast"))  
 ggsave(paste0(outputpath, "/nn_forecast_no_covariates.png"), width = 8, height = 4)
+
+################# KNN ###################
+
+# NOTE: Requires R 3.6 or higher. Run on different laptop. 
+run_knn <- FALSE
+if(run_knn == TRUE) {
+  ts_cnt <- msts(day$cnt, seasonal.periods=c(7, 365.25))
+  
+  pred <- knn_forecasting(ts_cnt, h = 31, lags = 1:31, msas = "MIMO", k = sqrt(nrow(day_train_forecast)))
+  autoplot(pred, highlight = "neighbors", faceting = FALSE)
+  
+  # ro <- rolling_origin(pred, h = 31)
+  # ro$global_accu
+  
+  results <- data.table(x = day$dteday)
+  results[, y := day$cnt]
+  results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+  results[test == 1, forecast := pred$prediction]
+  
+  mse_stl_test <- mean((day_test_forecast$cnt - pred$prediction )^2, na.rm = TRUE)
+  
+  results %>% 
+    ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
+    geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+    labs(title = paste0("Nearest-Neighbours: MIMO Forecasting"),
+         subtitle = paste0("Test RMSE: ", round(sqrt(mse_stl_test))), 
+         x = "Date", y = "Bike Count") +
+    theme_linedraw() +
+    theme(axis.ticks = element_blank()) +
+    scale_color_manual(name="", values=c(cols[[2]]),
+                       labels=c("Forecast")) + 
+    scale_fill_manual("95% PI", values = "grey12")
+  ggsave(paste0(outputpath, "/knn_forecast_test.png"), width = 8, height = 4)
+}
+
