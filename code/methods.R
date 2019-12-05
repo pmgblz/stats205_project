@@ -156,44 +156,56 @@ ggsave(paste0(outputpath, "/sma_forecast.png"), width = 8, height = 4)
 
 ################ ... stl forecast #############
 ts_cnt <- msts(day$cnt, seasonal.periods=c(7, 365.25))
-loess_decomp <- mstl(ts_cnt)
+loess_decomp <- mstl(ts_cnt, lambda = 0)
 png(filename="output/plots/mstl_whole_data.png")
-plot(loess_decomp, main = "Seasonal (Weekly & Monthly) Decomposition using LOESS on Entire Dataset")
+plot(loess_decomp, main = "Seasonal (Weekly, Yearly) Decomposition using LOESS on Entire Dataset")
 dev.off()
 
 # seasonal decomposition using loess
 # takes seasonality into account
 # no yearly seasonality since less than 2 years of data
 ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7))
-loess_decomp <- mstl(ts_cnt, s.window = 7)
+loess_decomp <- mstl(ts_cnt, s.window = 7, lambda = 0)
 
 png(filename="output/plots/mstl_training_data.png")
-plot(loess_decomp, main = "Seasonal (Weekly & Monthly) Decomposition using LOESS on Training Data")
+plot(loess_decomp, main = "Seasonal (Weekly) Decomposition using LOESS on Training Data")
 dev.off()
 
 # forecast using random walk assumption
 loess_forecast <- forecast(loess_decomp, h = nrow(day_test_forecast), method = "naive")
 
+exp_value <- function(x) {
+  return(exp(x))
+}
+
 results <- data.table(x = day$dteday)
 results[, y := day$cnt]
 results[, test := ifelse(x <= "2012-11-30", 0, 1)]
-results[test == 1, forecast := loess_forecast$mean[1:nrow(day_test_forecast)]]
-results[test == 1, upper_ci := loess_forecast$upper[1:nrow(day_test_forecast)]]
-results[test == 1, lower_ci := loess_forecast$lower[1:nrow(day_test_forecast)]]
+results[test == 0, fitted := lapply(loess_decomp[, 2], exp)]
+results[test == 1, forecast := unlist(lapply(loess_forecast$mean[1:nrow(day_test_forecast)],
+                                      function(x) sapply(x, exp_value)))]
+results[test == 1, upper_ci :=  unlist(lapply(loess_forecast$upper[1:nrow(day_test_forecast)],
+                                       function(x) sapply(x, exp_value)))]
+results[test == 1, lower_ci :=  unlist(lapply(loess_forecast$lower[1:nrow(day_test_forecast)],
+                                       function(x) sapply(x, exp_value)))]
 
-mse_stl_test <- mean((day_test_forecast$cnt - loess_forecast$mean[1:nrow(day_test_forecast)])^2, na.rm = TRUE)
+mse_stl_test <- mean((day_test_forecast$cnt - unlist(lapply(loess_forecast$mean[1:nrow(day_test_forecast)],
+                                                            function(x) sapply(x, exp_value))))^2, na.rm = TRUE)
+mse_stl_train <- mean((day_train_forecast$cnt - results[test == 0,]$fitted)^2, na.rm = TRUE)
+
 
 results %>% 
   ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
+  geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
-  geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
-  labs(title = paste0("Seasonal (Weekly & Monthly) Decomposition using LOESS: Forecast using Naive Random Walk"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_stl_test))), 
+  #geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
+  labs(title = paste0("Seasonal (Weekly) Decomposition using LOESS: Forecast using Naive Random Walk"),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_stl_test)), "; Training RMSE: ", round(sqrt(mse_gaussian_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
-  scale_color_manual(name="", values=c(cols[[2]]),
-                     labels=c("Forecast")) + 
+  scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
+                     labels=c("Fitted Trend Cycle","Forecas Random Walkt")) + 
   scale_fill_manual("95% PI", values = "grey12")
 ggsave(paste0(outputpath, "/stl_loess_forecast_test.png"), width = 8, height = 4)
 
@@ -263,7 +275,7 @@ results %>%
   labs(title = paste0("Loess Smoothing (Cross-validated on Training Set)"),
        subtitle = paste0("Test RMSE: ", round(sqrt(mse_loess_test)),
                          "; Training RMSE: ", round(sqrt(mse_loess_train)), 
-                         " (Smoothing Span: ", round(best_span, 2), "; Order: ", best_cv_order, ")"), 
+                         " (Smoothing Span: ", round(best_span, 3), "; Degree: ", best_degree, ")"), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
@@ -569,7 +581,7 @@ results %>%
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   geom_ribbon(aes(x = x, ymax = upper_ci, ymin = lower_ci, fill = ""), alpha = 0.3) + 
-  labs(title = paste0("TBATS with Box-Cox, Damped Trend and Weekly, Monthly and Yearly Seasonality"),
+  labs(title = paste0("TBATS with Box-Cox, Damped Trend and Weekly and Yearly Seasonality"),
        subtitle = paste0("Test RMSE: ", round(sqrt(mse_tbats_test)), "; Training RMSE: ", round(sqrt(mse_tbats_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
@@ -777,22 +789,31 @@ nn <- nnetar(ts_cnt, xreg = as.matrix(day_train_forecast[, ..covs]), repeats = 1
 nn_forecast <- forecast(nn,h=nrow(day_test_forecast), xreg = as.matrix(day_test_forecast[, ..covs]))
 plot(nn_forecast)
 
-results <- data.table(x = day_test_forecast$dteday)
-results[, y := day_test_forecast$cnt]
-results[, forecast :=  nn_forecast$mean[1:nrow(day_test_forecast)]]
+results <- data.table(x = day$dteday)
+results[, y := day$cnt]
+results[, instant := day$instant]
+results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+results[test == 0, fitted := nn$fitted]
+results[test == 1, forecast := fcast_sarima$mean[1:nrow(day_test_forecast)]]
+results[test == 1, upper_ci := fcast_sarima$upper[1:nrow(day_test_forecast), 2]]
+results[test == 1, lower_ci := fcast_sarima$lower[1:nrow(day_test_forecast), 2]]
+
 
 mse_nn_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
+mse_nn_train <- mean((day_train_forecast[index >= 366, ]$cnt - nn$fitted[366:length(nn$fitted)])^2)
 
 results %>% 
-  ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
+  ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
+  geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; With Covariates"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test))), 
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test)), " Training MSE: ",  round(sqrt(mse_nn_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
-  scale_color_manual(name="", values=c(cols[[2]]),
-                     labels=c("Forecast"))  
+  scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
+                     labels=c("Training","Forecast")) + 
+  scale_fill_manual("95% PI", values = "grey12")
 ggsave(paste0(outputpath, "/nn_forecast_covariates.png"), width = 8, height = 4)
 
 
@@ -803,23 +824,50 @@ nn <- nnetar(ts_cnt, repeats = 10000)
 nn_forecast <- forecast(nn,h=nrow(day_test_forecast))
 plot(nn_forecast)
 
-results <- data.table(x = day_test_forecast$dteday)
-results[, y := day_test_forecast$cnt]
-results[, forecast :=  nn_forecast$mean[1:nrow(day_test_forecast)]]
+results <- data.table(x = day$dteday)
+results[, y := day$cnt]
+results[, instant := day$instant]
+results[, test := ifelse(x <= "2012-11-30", 0, 1)]
+results[test == 0, fitted := nn$fitted]
+results[test == 1, forecast := fcast_sarima$mean[1:nrow(day_test_forecast)]]
+results[test == 1, upper_ci := fcast_sarima$upper[1:nrow(day_test_forecast), 2]]
+results[test == 1, lower_ci := fcast_sarima$lower[1:nrow(day_test_forecast), 2]]
 
 mse_nn_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
+mse_nn_train <- mean((day_train_forecast[index >= 366, ]$cnt - nn$fitted[366:length(nn$fitted)])^2)
 
 results %>% 
-  ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
+  ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
+  geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
-  labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; Without Covariates"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test))), 
+  labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; With Covariates"),
+       subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test)), " Training MSE: ",  round(sqrt(mse_nn_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
-  scale_color_manual(name="", values=c(cols[[2]]),
-                     labels=c("Forecast"))  
+  scale_color_manual(name="", values=c(cols[[1]],cols[[2]]),
+                     labels=c("Training","Forecast")) + 
+  scale_fill_manual("95% PI", values = "grey12")
 ggsave(paste0(outputpath, "/nn_forecast_no_covariates.png"), width = 8, height = 4)
+
+
+# results <- data.table(x = day_test_forecast$dteday)
+# results[, y := day_test_forecast$cnt]
+# results[, forecast :=  nn_forecast$mean[1:nrow(day_test_forecast)]]
+# 
+# mse_nn_test <- mean((day_test_forecast$cnt - nn_forecast$mean[1:nrow(day_test_forecast)])^2)
+# 
+# results %>% 
+#   ggplot(aes(x = x, y = y)) + geom_line(size = 0.2) +
+#   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+#   labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; Without Covariates"),
+#        subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test))), 
+#        x = "Date", y = "Bike Count") +
+#   theme_linedraw() +
+#   theme(axis.ticks = element_blank()) +
+#   scale_color_manual(name="", values=c(cols[[2]]),
+#                      labels=c("Forecast"))  
+# ggsave(paste0(outputpath, "/nn_forecast_no_covariates.png"), width = 8, height = 4)
 
 ################# KNN ###################
 
