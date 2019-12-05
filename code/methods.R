@@ -284,29 +284,11 @@ results[, instant := day$instant]
 mse_loess_test <- mean((results[test == 1, ]$y - results[test == 1, ]$fitted_test)^2)
 mse_loess_train <- mean((results[test == 0, ]$y - results[test == 0, ]$fitted_train)^2)
 
-# # plot results
-# plot(results$x,results$y,col="black", 
-#      main = "Nonparametric Regression Methods - Dataset A (Glass Fragments)", 
-#      xlab = "Aluminium Content", ylab = "Refractive Index", pch = 1, 
-#      cex.main = 1, cex = 0.5)
-# lines(results$x,results$fitted_train,col="green")  
-# lines(results$x,results$fitted_test,col="blue")   
-# legend(max(results$x - 1), max(results$y - 1),
-#        legend=c("Datapoints", "Regressogram", "Boxcar"),
-#        pch = c(19, NA, NA), lty = c(NA, 1, 2),
-#        col=c("black","green", "blue"),  cex=0.8) 
-
-
 results %>% 
-  ggplot(aes(x = x, y = y, col = "Datapoints")) + geom_point(size = 0.05, shape = 19)   + 
+  ggplot(aes(x = x, y = y, col = "Datapoints")) + geom_point(size = 0.0000005, shape = 19)   + 
   geom_line(aes(x = x, y = fitted_train, col = "Fitted")) + 
   geom_line(aes(x = x, y = fitted_test, col = "Forecast")) + 
-  labs(title = paste0("Loess"),
-       subtitle = paste0("Test RMSE: ", round(sqrt(mse_loess_test)),
-                         "; Training RMSE: ", round(sqrt(mse_loess_train)), 
-                         " (Cross-Validated Smoothing Span: ", round(best_span, 3),
-                         "; Cross-Validated Degree: ", best_degree, ")"), 
-       x = "Date", y = "Bike Count") +
+  labs(x = "Date", y = "Bike Count") +
   theme_linedraw() +
   theme(axis.ticks = element_blank()) +
   theme(plot.title = element_text(hjust = 0.5, size = 8),
@@ -314,10 +296,10 @@ results %>%
         axis.text=element_text(size=6), 
         axis.title = element_text(size=6), 
         legend.text = element_text(size = 6)) + 
+  theme(legend.position = "bottom", legend.direction = "horizontal") + 
   scale_colour_manual("",values = c("black",cols[[1]],cols[[2]]),
                       guide = guide_legend(override.aes = list(linetype = c("blank", "solid", "solid"),
                         shape = c(19, NA, NA))))
-
 ggsave(paste0(outputpath, "/loess_smoothing.png"), width = 8, height = 4)
 
 ########## GAUSSIAN KERNEL ################# 

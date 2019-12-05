@@ -475,3 +475,21 @@ mse_order[d + 1, 3] <- loess_cv_span
 #   mse_order[d + 1, 3] <- loess_cv_span
 # }
 
+# # plot results
+# plot(results$x,results$y,col="black", 
+#      main = "Nonparametric Regression Methods - Dataset A (Glass Fragments)", 
+#      xlab = "Aluminium Content", ylab = "Refractive Index", pch = 1, 
+#      cex.main = 1, cex = 0.5)
+# lines(results$x,results$fitted_train,col="green")  
+# lines(results$x,results$fitted_test,col="blue")   
+# legend(max(results$x - 1), max(results$y - 1),
+#        legend=c("Datapoints", "Regressogram", "Boxcar"),
+#        pch = c(19, NA, NA), lty = c(NA, 1, 2),
+#        col=c("black","green", "blue"),  cex=0.8) 
+
+# labs(title = paste0("Loess"),
+#      subtitle = paste0("Test RMSE: ", round(sqrt(mse_loess_test)),
+#                        "; Training RMSE: ", round(sqrt(mse_loess_train)), 
+#                        " (Cross-Validated Smoothing Span: ", round(best_span, 3),
+#                        "; Cross-Validated Degree: ", best_degree, ")"), 
+#      x = "Date", y = "Bike Count") +
