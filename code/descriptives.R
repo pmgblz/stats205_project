@@ -14,6 +14,30 @@ row.names(summ_stats) <- c("Fall", "Spring", "Summer", "Winter",
                            "Rainy Weather", "Thunderstorm", "Temperature",
                            "Felt Temperature", "Humidity", "Windspeed", "Casual Users", 
                            "Registered Users", "All Users")
+# save
+stargazer(summ_stats,
+          type = "latex", 
+          summary=FALSE, rownames=TRUE,
+          digits = 2) -> sumstats 
+
+tabular_positions <- grep("tabular", sumstats)
+sumstats <- sumstats[tabular_positions[1]:tabular_positions[2]]
+write(sumstats,  file="output/tables/summary_stats.tex")
+
+######### BY DAY 
+
+# Make a data.frame containing summary statistics of interest
+summ_stats <- fBasics::basicStats(sumstats_day[, -c("dteday", "yr", "casual", "registered", "mnth")])
+summ_stats <- as.data.frame(t(summ_stats))
+
+# Rename some of the columns for convenience
+summ_stats <- summ_stats[c("Mean", "Stdev", "Minimum",  "Median",  "Maximum")]
+colnames(summ_stats)[colnames(summ_stats) %in% c('Minimum', 'Maximum')] <- c('Min.', 'Max.')
+
+row.names(summ_stats) <- c("Fall", "Spring", "Summer", "Winter", 
+                           "Holiday", "Day of Week", "Workday", "Clear Weather", "Misty Weather", 
+                           "Rainy Weather",  "Temperature",
+                           "Felt Temperature", "Humidity", "Windspeed", "All Users")
 
 
 
@@ -25,7 +49,11 @@ stargazer(summ_stats,
 
 tabular_positions <- grep("tabular", sumstats)
 sumstats <- sumstats[tabular_positions[1]:tabular_positions[2]]
-write(sumstats,  file="output/tables/summary_stats.tex")
+sumstats[1] <- "\\begin{tabular}{@{\\extracolsep{5pt}} lccccc} "
+write(sumstats,  file="output/tables/summary_stats_day.tex")
+
+
+
 
 hour_plot <- hour
 colnames(hour_plot) <- c("Date", "Fall", "Spring", "Summer", "Winter", 
@@ -54,9 +82,11 @@ dev.off()
 # plot daily trends
 day %>% 
   ggplot(aes(dteday, cnt)) + geom_point(size = 0.5) + 
-  xlab("Day") + ylab("Total Number of Users")
+  xlab("Day") + ylab("Total Number of Users")  +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) 
 
-ggsave("output/plots/users_by_day.png")
+ggsave("output/plots/users_by_day.png", width = 8, height = 4)
 
 # average number of users by hour 
 users_by_hour <- hour[, .(avg_users_by_hours = mean(cnt)), by = c("hr")]
