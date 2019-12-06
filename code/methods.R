@@ -664,8 +664,7 @@ ts_cnt <- msts(day_train_forecast$cnt, seasonal.periods=c(7, 365.25))
 #                      order = c(best_p, best_d, best_q), 
 #                      seasonal =   c(best_PS, best_DS, best_QS))
 
-best_sarima <- auto.arima(ts_cnt)
-
+best_sarima <- auto.arima(ts_cnt, D = 1)
 fcast_sarima <- forecast(best_sarima, h = nrow(day_test_forecast))
 plot(fcast_sarima)
 
@@ -759,7 +758,7 @@ ggsave(paste0(outputpath, "/sarima_forecast.png"), width = 8, height = 4)
 #                      order = c(best_p, best_d, best_q), 
 #                      seasonal =   c(best_PS, best_DS, best_QS))
 
-best_sarima_covs <- auto.arima(ts_cnt, xreg = as.matrix(day_train_forecast[, ..covs]))
+best_sarima_covs <- auto.arima(ts_cnt, xreg = as.matrix(day_train_forecast[, ..covs]), D = 1)
 
 fcast_sarima_covs <- forecast(best_sarima_covs, 
                               h = nrow(day_test_forecast),
