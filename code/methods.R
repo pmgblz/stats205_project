@@ -87,6 +87,9 @@ day_test_forecast[, index := .I]
 
 numbins <- 15
 day_train_forecast$bins <- as.numeric(cut(day_train_forecast$dteday, numbins + 1))
+
+# I ran it until 700
+# only 20 for speed now since best was 15
 order_max <- 20
 mse_order <- matrix(nrow = order_max, ncol = 2)
 
@@ -311,8 +314,8 @@ day_train_forecast[, index := .I]
 numbins <- 15
 day_train_forecast$bins <- as.numeric(cut(day_train_forecast$dteday, numbins + 1))
 
-# I ran it until 200, best was 30
-# only 50 for speed now
+# I ran it until 700
+# only 50 for speed now since best was 23
 order_max <- 50
 
 mse_order <- matrix(nrow = order_max, ncol = 2)
