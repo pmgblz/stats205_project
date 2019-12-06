@@ -293,9 +293,9 @@ results %>%
   theme(axis.ticks = element_blank()) +
   theme(plot.title = element_text(hjust = 0.5, size = 8),
         plot.subtitle =  element_text(hjust = 0.5, size = 8), 
-        axis.text=element_text(size=6), 
-        axis.title = element_text(size=6), 
-        legend.text = element_text(size = 6)) + 
+        axis.text=element_text(size=10), 
+        axis.title = element_text(size=10), 
+        legend.text = element_text(size = 10)) + 
   theme(legend.position = "bottom", legend.direction = "horizontal") + 
   scale_colour_manual("",values = c("black",cols[[1]],cols[[2]]),
                       guide = guide_legend(override.aes = list(linetype = c("blank", "solid", "solid"),
@@ -911,4 +911,3 @@ if(run_knn == TRUE) {
     scale_fill_manual("95% PI", values = "grey12")
   ggsave(paste0(outputpath, "/knn_forecast_test.png"), width = 8, height = 4)
 }
-
