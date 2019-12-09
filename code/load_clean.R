@@ -64,3 +64,11 @@ hour_temp <- hour[, .(mean_count = mean(cnt)), by = c("temp")]
 hour_temp <- hour[, lapply(.SD, mean), by=temp]
 
 day[, month := mnth + yr*12]
+
+# durbin watson 
+dwtest(day$cnt ~ day$instant)
+# partial autocorrelation
+pacf(day$cnt, lag.max = nrow(day))
+# auto correlation 
+acf(day$cnt, lag.max = nrow(day))
+#

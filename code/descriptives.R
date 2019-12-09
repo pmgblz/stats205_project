@@ -96,4 +96,12 @@ users_by_hour %>%
   xlab("Hour") + ylab("Average Number of Users")
 ggsave("output/plots/average_number_users_by_hour.png")
 
+# average number of users by weekday 
+users_by_weekday <- day[, .(avg_users_by_weekday = mean(cnt)), by = c("weekday")]
+
+users_by_weekday %>% 
+  ggplot(aes(weekday, avg_users_by_weekday)) + geom_line(size = 0.5) + 
+  xlab("Day") + ylab("Average Number of by Weekday")
+ggsave("output/plots/average_number_users_by_weekday.png")
+
 
