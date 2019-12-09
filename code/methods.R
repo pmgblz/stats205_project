@@ -29,7 +29,7 @@ library(stargazer)
 #library(KernSmooth)
 library(forecast)
 #library(Kendall)
-#library(trend)
+library(trend)
 #library(aTSA)
 library(lmtest)
 library(nnfor)
@@ -671,6 +671,24 @@ results %>%
   scale_fill_manual("95% PI", values = "grey12")
 ggsave(paste0(outputpath, "/sarimacovs_forecast.png"), width = 8, height = 4)
 
+results %>% 
+  dplyr::filter(x >= "2012-12-01") %>% 
+  ggplot(aes(x = x, y = y, col = "Datapoints")) + geom_point(size = 0.0000005, shape = 19)   + 
+  geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
+  geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
+  labs(x = "Date", y = "Bike Count") +
+  theme_linedraw() +
+  theme(axis.ticks = element_blank()) +
+  theme(plot.title = element_text(hjust = 0.5, size = 8),
+        plot.subtitle =  element_text(hjust = 0.5, size = 8), 
+        axis.text=element_text(size=10), 
+        axis.title = element_text(size=10), 
+        legend.text = element_text(size = 10)) + 
+  theme(legend.position = "bottom", legend.direction = "horizontal") + 
+  scale_colour_manual("",values = c("black",cols[[1]],cols[[2]]),
+                      guide = guide_legend(override.aes = list(linetype = c("blank", "solid", "solid"),
+                                                               shape = c(19, NA, NA))))
+ggsave(paste0(outputpath, "/sarima_forecast_include.png"), width = 8, height = 4)
 
 ############### Neural Network Autoregression ###############
 

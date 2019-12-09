@@ -71,4 +71,5 @@ dwtest(day$cnt ~ day$instant)
 pacf(day$cnt, lag.max = nrow(day))
 # auto correlation 
 acf(day$cnt, lag.max = nrow(day))
-#
+# mann-kendall (seasonal)
+smk.test(ts_cnt)
