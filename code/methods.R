@@ -60,10 +60,6 @@ cols <- c("steelblue4", "goldenrod2", "grey4")
 covs <- c("season", "yr", "mnth", "holiday", "weekday",
           "workingday", "weathersit", "temp", "atemp", "hum", "windspeed")
 
-# covs <- c("season.Fall", "season.Spring", "season.Summer", "season.Winter", "yr", "mnth", "holiday", "weekday",
-#           "workingday", "weathersit.Clear", "weathersit.Misty", "weathersit.Rain" , 
-#           "temp", "atemp", "hum", "windspeed")
-
 ######## TEST & TRAIN DATA ###########
 set.seed(1)
 
@@ -78,8 +74,6 @@ day_test_forecast <- day_test_forecast[order(day_test_forecast$dteday),]
 
 day_train_forecast[, index := .I]
 day_test_forecast[, index := .I]
-# day_train_forecast <- day[1:round(nrow(day)*train_fraction), ]
-# day_test_forecast <- day[(round(nrow(day)*train_fraction) + 1):nrow(day), ]
 
 ######### SIMPLE MOVING AVERAGE ########### 
 
