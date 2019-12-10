@@ -653,6 +653,8 @@ results[test == 1, forecast := fcast_sarima_covs$mean[1:nrow(day_test_forecast)]
 results[test == 1, upper_ci := fcast_sarima_covs$upper[1:nrow(day_test_forecast), 2]]
 results[test == 1, lower_ci := fcast_sarima_covs$lower[1:nrow(day_test_forecast), 2]]
 
+write.csv(results, file = paste0(outputpath, "/sarima_results.csv"))
+
 mse_sarimacovs_test <- mean((day_test_forecast$cnt - fcast_sarima_covs$mean[1:nrow(day_test_forecast)])^2)
 mse_sarimacovs_train <- mean((day_train_forecast$cnt - best_sarima_covs$fitted)^2)
 
@@ -673,8 +675,7 @@ ggsave(paste0(outputpath, "/sarimacovs_forecast.png"), width = 8, height = 4)
 
 results %>% 
   dplyr::filter(x >= "2012-12-01") %>% 
-  ggplot(aes(x = x, y = y, col = "Datapoints")) + geom_point(size = 0.0000005, shape = 19)   + 
-  geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
+  ggplot(aes(x = x, y = y, col = "Data")) + geom_line()+ 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
   labs(x = "Date", y = "Bike Count") +
   theme_linedraw() +
@@ -685,9 +686,9 @@ results %>%
         axis.title = element_text(size=10), 
         legend.text = element_text(size = 10)) + 
   theme(legend.position = "bottom", legend.direction = "horizontal") + 
-  scale_colour_manual("",values = c("black",cols[[1]],cols[[2]]),
-                      guide = guide_legend(override.aes = list(linetype = c("blank", "solid", "solid"),
-                                                               shape = c(19, NA, NA))))
+  scale_colour_manual("",values = c(cols[[1]],cols[[2]]),
+                      guide = guide_legend(override.aes = list(linetype = c("solid", "solid"),
+                                                               shape = c(NA, NA))))
 ggsave(paste0(outputpath, "/sarima_forecast_include.png"), width = 8, height = 4)
 
 ############### Neural Network Autoregression ###############
@@ -749,7 +750,7 @@ results %>%
   ggplot(aes(x = x, y = y)) + geom_point(size = 0.2) +
   geom_line(aes(x = x, y = fitted, col = "Fitted")) + 
   geom_line(aes(x = x, y = forecast, col = "Forecast")) + 
-  labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; With Covariates"),
+  labs(title = paste0("Neural Network Autoregression: Feed-Forward NN; Single Hidden Layer; Without Covariates"),
        subtitle = paste0("Test RMSE: ", round(sqrt(mse_nn_test)), " Training MSE: ",  round(sqrt(mse_nn_train))), 
        x = "Date", y = "Bike Count") +
   theme_linedraw() +
