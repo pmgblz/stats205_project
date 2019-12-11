@@ -1,3 +1,10 @@
+---
+title: 
+output: pdf_document
+---
+\pagenumbering{gobble}
+
+```{r eval=FALSE}
 ######## LOAD & CLEAN DATA ###########
 
 # Load data 
@@ -8,32 +15,35 @@ hour <- read_csv("data/hour.csv")
 hour <- hour[order(hour$dteday, hour$hr),]
 day <- day[order(day$dteday),]
 
-# Clean data 
+
+# Clean data
 setDT(hour)
 hour[, season := as.factor(ifelse(season == 1, "Spring", 
-                                  ifelse(season == 2, "Summer", 
-                                         ifelse(season == 3, "Fall", 
-                                                ifelse(season == 4, "Winter", NA)))))]
+                            ifelse(season == 2, "Summer", 
+                                   ifelse(season == 3, "Fall", 
+                                          ifelse(season == 4, "Winter", NA)))))]
 
 hour[, weathersit := as.factor(ifelse(weathersit == 1, "Clear", 
-                                      ifelse(weathersit == 2, "Misty", 
-                                             ifelse(weathersit == 3, "Rain", 
-                                                    ifelse(weathersit == 4, "Thunderstorm", NA)))))]
+                              ifelse(weathersit == 2, "Misty", 
+                                     ifelse(weathersit == 3, "Rain", 
+                                            ifelse(weathersit == 4, 
+                                                   "Thunderstorm", NA)))))]
 
 hour <- hour[, -c("instant")]
-
-
 
 sumstats_day <- day
 setDT(sumstats_day)
 sumstats_day[, season := as.factor(ifelse(season == 1, "Spring", 
-                                          ifelse(season == 2, "Summer", 
-                                                 ifelse(season == 3, "Fall", 
-                                                        ifelse(season == 4, "Winter", NA)))))]
+                                  ifelse(season == 2, "Summer", 
+                                         ifelse(season == 3, "Fall", 
+                                                ifelse(season == 4, 
+                                                       "Winter", NA)))))]
+
 sumstats_day[, weathersit := as.factor(ifelse(weathersit == 1, "Clear", 
-                                              ifelse(weathersit == 2, "Misty", 
-                                                     ifelse(weathersit == 3, "Rain", 
-                                                            ifelse(weathersit == 4, "Thunderstorm", NA)))))]
+                                        ifelse(weathersit == 2, "Misty", 
+                                               ifelse(weathersit == 3, "Rain", 
+                                                      ifelse(weathersit == 4,
+                                                             "Thunderstorm", NA)))))]
 sumstats_day <- sumstats_day[, -c("instant")]
 
 
@@ -43,8 +53,6 @@ hour <- data.frame(predict(dmy, newdata = hour))
 
 dmy <- dummyVars(" ~ .", data = sumstats_day)
 sumstats_day <- data.frame(predict(dmy, newdata = sumstats_day))
-# Drop rows containing missing values (doesn't actually do anything)
-hour <- na.omit(hour)
 
 # get total counts
 setDT(hour)
@@ -69,3 +77,4 @@ pacf(day$cnt, lag.max = nrow(day))
 acf(day$cnt, lag.max = nrow(day))
 # mann-kendall (seasonal)
 smk.test(ts_cnt)
+```
