@@ -41,6 +41,7 @@ library(Mcomp)
 library(purrr)
 library(rlang)
 library(tsfknn)
+library(urca)
 
 # Run path
 if (dir.exists("/Users/paula/stats205_project/")) {

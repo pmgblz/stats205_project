@@ -77,4 +77,6 @@ pacf(day$cnt, lag.max = nrow(day))
 acf(day$cnt, lag.max = nrow(day))
 # mann-kendall (seasonal)
 smk.test(ts_cnt)
+# unit root stationarity (reject null)
+summary(ur.kpss(day$cnt))
 ```
